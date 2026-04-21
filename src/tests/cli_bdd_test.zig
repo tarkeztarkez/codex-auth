@@ -239,15 +239,13 @@ test "Scenario: Given help when rendering then login and command help notes are 
     var auto_cfg = registry.defaultAutoSwitchConfig();
     var api_cfg = registry.defaultApiConfig();
     auto_cfg.enabled = true;
-    auto_cfg.threshold_5h_percent = 12;
-    auto_cfg.threshold_weekly_percent = 8;
     api_cfg.usage = true;
     api_cfg.account = true;
 
     try cli.writeHelp(&aw.writer, false, &auto_cfg, &api_cfg);
 
     const help = aw.written();
-    try std.testing.expect(std.mem.indexOf(u8, help, "Auto Switch: ON (5h<12%, weekly<8%)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "Auto Switch: ON") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "Usage API: ON (api)") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "Account API: ON") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "--cpa [<path>]") != null);
@@ -261,7 +259,7 @@ test "Scenario: Given help when rendering then login and command help notes are 
     try std.testing.expect(std.mem.indexOf(u8, help, "config") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "auto enable") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "auto disable") != null);
-    try std.testing.expect(std.mem.indexOf(u8, help, "auto --5h <percent> [--weekly <percent>]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "auto --5h <percent> [--weekly <percent>]") == null);
     try std.testing.expect(std.mem.indexOf(u8, help, "api enable") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "api disable") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "auto ...") == null);
@@ -362,57 +360,6 @@ test "Scenario: Given status when parsing then status command is preserved" {
     }
 }
 
-test "Scenario: Given config auto 5h threshold when parsing then threshold configuration is preserved" {
-    const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "--5h", "12" };
-    var result = try cli.parseArgs(gpa, &args);
-    defer cli.freeParseResult(gpa, &result);
-
-    switch (result) {
-        .command => |cmd| switch (cmd) {
-            .config => |opts| switch (opts) {
-                .auto_switch => |auto_opts| switch (auto_opts) {
-                    .configure => |cfg| {
-                        try std.testing.expect(cfg.threshold_5h_percent != null);
-                        try std.testing.expect(cfg.threshold_5h_percent.? == 12);
-                        try std.testing.expect(cfg.threshold_weekly_percent == null);
-                    },
-                    else => return error.TestExpectedEqual,
-                },
-                else => return error.TestExpectedEqual,
-            },
-            else => return error.TestExpectedEqual,
-        },
-        else => return error.TestExpectedEqual,
-    }
-}
-
-test "Scenario: Given config auto thresholds together when parsing then both window thresholds are preserved" {
-    const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "--5h", "12", "--weekly", "8" };
-    var result = try cli.parseArgs(gpa, &args);
-    defer cli.freeParseResult(gpa, &result);
-
-    switch (result) {
-        .command => |cmd| switch (cmd) {
-            .config => |opts| switch (opts) {
-                .auto_switch => |auto_opts| switch (auto_opts) {
-                    .configure => |cfg| {
-                        try std.testing.expect(cfg.threshold_5h_percent != null);
-                        try std.testing.expect(cfg.threshold_5h_percent.? == 12);
-                        try std.testing.expect(cfg.threshold_weekly_percent != null);
-                        try std.testing.expect(cfg.threshold_weekly_percent.? == 8);
-                    },
-                    else => return error.TestExpectedEqual,
-                },
-                else => return error.TestExpectedEqual,
-            },
-            else => return error.TestExpectedEqual,
-        },
-        else => return error.TestExpectedEqual,
-    }
-}
-
 test "Scenario: Given config auto enable when parsing then auto action is preserved" {
     const gpa = std.testing.allocator;
     const args = [_][:0]const u8{ "codex-auth", "config", "auto", "enable" };
@@ -424,7 +371,6 @@ test "Scenario: Given config auto enable when parsing then auto action is preser
             .config => |opts| switch (opts) {
                 .auto_switch => |auto_opts| switch (auto_opts) {
                     .action => |action| try std.testing.expectEqual(cli.AutoAction.enable, action),
-                    else => return error.TestExpectedEqual,
                 },
                 else => return error.TestExpectedEqual,
             },
@@ -470,74 +416,22 @@ test "Scenario: Given config api disable when parsing then api disable action is
     }
 }
 
-test "Scenario: Given config auto action mixed with threshold flags when parsing then usage error is returned" {
-    const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "enable", "--5h", "12" };
-    var result = try cli.parseArgs(gpa, &args);
-    defer cli.freeParseResult(gpa, &result);
-
-    try expectUsageError(result, .config, "cannot mix actions");
-}
-
-test "Scenario: Given config auto threshold percent out of range when parsing then usage error is returned" {
-    const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "--weekly", "0" };
-    var result = try cli.parseArgs(gpa, &args);
-    defer cli.freeParseResult(gpa, &result);
-
-    try expectUsageError(result, .config, "`--weekly` must be an integer from 1 to 100.");
-}
-
-test "Scenario: Given config auto repeated threshold flag when parsing then usage error is returned" {
-    const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "--5h", "12", "--5h", "15" };
-    var result = try cli.parseArgs(gpa, &args);
-    defer cli.freeParseResult(gpa, &result);
-
-    try expectUsageError(result, .config, "duplicate `--5h`");
-}
-
-test "Scenario: Given config auto threshold without value when parsing then usage error is returned" {
-    const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "--weekly" };
-    var result = try cli.parseArgs(gpa, &args);
-    defer cli.freeParseResult(gpa, &result);
-
-    try expectUsageError(result, .config, "missing value for `--weekly`");
-}
-
-test "Scenario: Given config auto threshold command without flags when parsing then usage error is returned" {
+test "Scenario: Given config auto without action when parsing then usage error is returned" {
     const gpa = std.testing.allocator;
     const args = [_][:0]const u8{ "codex-auth", "config", "auto" };
     var result = try cli.parseArgs(gpa, &args);
     defer cli.freeParseResult(gpa, &result);
 
-    try expectUsageError(result, .config, "requires an action or threshold flags");
+    try expectUsageError(result, .config, "requires `enable` or `disable`");
 }
 
-test "Scenario: Given config auto threshold with weekly only when parsing then single-window config is preserved" {
+test "Scenario: Given config auto unknown action when parsing then usage error is returned" {
     const gpa = std.testing.allocator;
-    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "--weekly", "9" };
+    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "status" };
     var result = try cli.parseArgs(gpa, &args);
     defer cli.freeParseResult(gpa, &result);
 
-    switch (result) {
-        .command => |cmd| switch (cmd) {
-            .config => |opts| switch (opts) {
-                .auto_switch => |auto_opts| switch (auto_opts) {
-                    .configure => |cfg| {
-                        try std.testing.expect(cfg.threshold_5h_percent == null);
-                        try std.testing.expect(cfg.threshold_weekly_percent != null);
-                        try std.testing.expect(cfg.threshold_weekly_percent.? == 9);
-                    },
-                    else => return error.TestExpectedEqual,
-                },
-                else => return error.TestExpectedEqual,
-            },
-            else => return error.TestExpectedEqual,
-        },
-        else => return error.TestExpectedEqual,
-    }
+    try expectUsageError(result, .config, "unknown action `status`");
 }
 
 test "Scenario: Given removed top-level auto command when parsing then usage error is returned" {

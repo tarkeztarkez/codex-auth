@@ -318,10 +318,6 @@ test "Scenario: Given account_id query when finding matching accounts then it is
 test "Scenario: Given foreground commands when checking reconcile policy then config commands self-heal services but status does not" {
     try std.testing.expect(main_mod.shouldReconcileManagedService(.{ .list = .{} }));
     try std.testing.expect(main_mod.shouldReconcileManagedService(.{ .config = .{ .auto_switch = .{ .action = .enable } } }));
-    try std.testing.expect(main_mod.shouldReconcileManagedService(.{ .config = .{ .auto_switch = .{ .configure = .{
-        .threshold_5h_percent = 12,
-        .threshold_weekly_percent = null,
-    } } } }));
     try std.testing.expect(main_mod.shouldReconcileManagedService(.{ .config = .{ .api = .enable } }));
     try std.testing.expect(!main_mod.shouldReconcileManagedService(.{ .help = .top_level }));
     try std.testing.expect(!main_mod.shouldReconcileManagedService(.{ .status = {} }));

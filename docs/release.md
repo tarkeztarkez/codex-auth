@@ -1,6 +1,6 @@
 # Release and CI
 
-This document describes the repository's CI, preview package publishing, and tag-driven release automation.
+This document describes the repository's CI, preview package publishing, branch-triggered npm publishing, and tag-driven release automation.
 
 ## Version Source of Truth
 
@@ -43,6 +43,28 @@ This document describes the repository's CI, preview package publishing, and tag
    - The tag push triggers the release workflow in `.github/workflows/release.yml`.
    - After a release tag has been pushed, do not reuse that version number. If the tag-driven release workflow later fails and you need another attempt, prepare and publish a new version instead.
 
+## Branch npm Publish Checklist
+
+Use this flow when you need to publish npm packages from the current branch before creating a release tag.
+
+1. Push the branch and wait for the latest `CI` run for that exact commit to succeed.
+   - `.github/workflows/ci.yml` now validates every pushed branch, not only `main`.
+   - If the branch `CI` run fails, fix the problem, keep the same target version, and push again.
+2. Update the local version files before dispatching the npm publish workflow.
+   - Update `src/version.zig`.
+   - Update `package.json`.
+   - Update every platform package version under `package.json.optionalDependencies` to the same version.
+3. Validate the version change locally.
+   - Because `src/version.zig` changes, run `zig build run -- list`.
+   - Run side-effecting validation from an isolated directory under `/tmp/<task-name>` with `HOME=/tmp/<task-name>`.
+4. Manually dispatch `.github/workflows/release.yml` from the branch you want to publish.
+   - Select the branch in the Actions UI.
+   - Fill `release_version` with the exact package version, for example `0.2.6-alpha.3`.
+5. Let the workflow publish npm packages only.
+   - Branch-triggered manual runs do not create GitHub releases and do not require a git tag.
+   - Stable versions publish to npm dist-tag `latest`.
+   - Prerelease versions publish to npm dist-tag `next`.
+
 ## npm Package Layout
 
 - npm distribution uses one root package plus six platform packages.
@@ -62,6 +84,8 @@ This document describes the repository's CI, preview package publishing, and tag
 ## CI Workflow
 
 - Branch and pull request validation runs in `.github/workflows/ci.yml`.
+- Push validation runs for every branch.
+- Pull request validation still targets PRs against `main`.
 - The `build-test` matrix runs on `ubuntu-latest`, `macos-latest`, and `windows-latest`.
 - CI installs Zig `0.15.1` and runs `zig test src/main.zig -lc`.
 
@@ -81,6 +105,7 @@ This document describes the repository's CI, preview package publishing, and tag
 - Tag pushes matching `v*` run `.github/workflows/release.yml`.
 - The release workflow first validates the code with the same `build-test` matrix used by CI.
 - It then cross-builds release assets for the six supported targets on Ubuntu.
+- Manual `workflow_dispatch` runs from a selected branch use the same build and npm packaging pipeline, but they skip GitHub release creation.
 - Release notes are generated from git tags and commit history.
 - GitHub releases are published automatically from the tag pipeline.
 - Stable tags create normal GitHub releases.
@@ -93,5 +118,6 @@ This document describes the repository's CI, preview package publishing, and tag
 - `.github/workflows/release.yml` uses `actions/setup-node@v6` with Node `24` for the npm packaging and publish steps so the bundled npm CLI supports Trusted Publishing.
 - The `setup-node` steps in `.github/workflows/release.yml` explicitly set `package-manager-cache: false` to avoid future automatic npm cache behavior changes in the release pipeline.
 - npm provenance validation requires the package `repository.url` metadata to match the GitHub repository URL exactly: `https://github.com/Loongphy/codex-auth`
+- Manual branch-triggered runs must pass a `release_version` input that matches `package.json` and `src/version.zig`.
 - Stable tags such as `v0.1.3` publish to npm dist-tag `latest`.
 - Prerelease tags such as `v0.2.0-rc.1`, `v0.2.0-beta.1`, and `v0.2.0-alpha.1` publish to npm dist-tag `next`.

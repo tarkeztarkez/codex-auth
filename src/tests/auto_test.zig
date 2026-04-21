@@ -437,7 +437,7 @@ fn fetchCandidateUsageByAuthPathDetailed(_: std.mem.Allocator, auth_path: []cons
         if (std.mem.eql(u8, auth_path, path)) {
             return .{
                 .snapshot = .{
-                    .primary = .{ .used_percent = 96.0, .window_minutes = 300, .resets_at = null },
+                    .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
                     .secondary = .{ .used_percent = 60.0, .window_minutes = 10080, .resets_at = null },
                     .credits = null,
                     .plan_type = .pro,
@@ -571,6 +571,38 @@ test "Scenario: Given free candidate with only a primary weekly window when sele
     try std.testing.expect(std.mem.eql(u8, reg.accounts.items[idx].email, "free@example.com"));
 }
 
+test "Scenario: Given usable candidates with different reset times when selecting auto candidate then the earlier reset wins" {
+    const gpa = std.testing.allocator;
+    var reg = bdd.makeEmptyRegistry();
+    defer reg.deinit(gpa);
+
+    const now = std.time.timestamp();
+    try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = now + 1800 },
+        .secondary = .{ .used_percent = 30.0, .window_minutes = 10080, .resets_at = now + 7 * 24 * 60 * 60 },
+        .credits = null,
+        .plan_type = null,
+    }, 100);
+    try appendAccountWithUsage(gpa, &reg, "early@example.com", .{
+        .primary = .{ .used_percent = 90.0, .window_minutes = 300, .resets_at = now + 5 * 60 + 11 },
+        .secondary = .{ .used_percent = 60.0, .window_minutes = 10080, .resets_at = now + 7 * 24 * 60 * 60 },
+        .credits = null,
+        .plan_type = null,
+    }, 200);
+    try appendAccountWithUsage(gpa, &reg, "late@example.com", .{
+        .primary = .{ .used_percent = 10.0, .window_minutes = 300, .resets_at = now + 5 * 60 + 30 },
+        .secondary = .{ .used_percent = 10.0, .window_minutes = 10080, .resets_at = now + 7 * 24 * 60 * 60 },
+        .credits = null,
+        .plan_type = null,
+    }, 300);
+    const active_account_key = try bdd.accountKeyForEmailAlloc(gpa, "active@example.com");
+    defer gpa.free(active_account_key);
+    try registry.setActiveAccountKey(gpa, &reg, active_account_key);
+
+    const idx = auto.bestAutoSwitchCandidateIndex(&reg, now) orelse return error.TestExpectedEqual;
+    try std.testing.expect(std.mem.eql(u8, reg.accounts.items[idx].email, "early@example.com"));
+}
+
 test "Scenario: Given free candidate with only a secondary weekly window when selecting auto candidate then it remains eligible" {
     const gpa = std.testing.allocator;
     var reg = bdd.makeEmptyRegistry();
@@ -620,14 +652,14 @@ test "Scenario: Given free account with only a weekly window when checking curre
     try std.testing.expect(!auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
 }
 
-test "Scenario: Given weekly remaining below threshold when checking current then auto switch is required" {
+test "Scenario: Given weekly remaining reaches zero when checking current then auto switch is required" {
     const gpa = std.testing.allocator;
     var reg = bdd.makeEmptyRegistry();
     defer reg.deinit(gpa);
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
         .primary = .{ .used_percent = 20.0, .window_minutes = 300, .resets_at = null },
-        .secondary = .{ .used_percent = 97.0, .window_minutes = 10080, .resets_at = null },
+        .secondary = .{ .used_percent = 100.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
     }, 100);
@@ -638,14 +670,13 @@ test "Scenario: Given weekly remaining below threshold when checking current the
     try std.testing.expect(auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
 }
 
-test "Scenario: Given custom 5h threshold when checking current then it uses configured value" {
+test "Scenario: Given 5h remaining is non-zero when checking current then it does not switch early" {
     const gpa = std.testing.allocator;
     var reg = bdd.makeEmptyRegistry();
     defer reg.deinit(gpa);
-    reg.auto_switch.threshold_5h_percent = 15;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 88.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 40.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
@@ -654,7 +685,7 @@ test "Scenario: Given custom 5h threshold when checking current then it uses con
     defer gpa.free(active_account_key);
     try registry.setActiveAccountKey(gpa, &reg, active_account_key);
 
-    try std.testing.expect(auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
+    try std.testing.expect(!auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
 }
 
 test "Scenario: Given missing window_minutes in the primary slot when checking current then 5h fallback still triggers auto switch" {
@@ -663,7 +694,7 @@ test "Scenario: Given missing window_minutes in the primary slot when checking c
     defer reg.deinit(gpa);
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = null, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = null, .resets_at = null },
         .secondary = .{ .used_percent = 20.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
@@ -675,13 +706,13 @@ test "Scenario: Given missing window_minutes in the primary slot when checking c
     try std.testing.expect(auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
 }
 
-test "Scenario: Given free account near exhaustion when checking current then realtime guard switches earlier than the configured threshold" {
+test "Scenario: Given free account still has quota when checking current then it does not switch early" {
     const gpa = std.testing.allocator;
     var reg = bdd.makeEmptyRegistry();
     defer reg.deinit(gpa);
 
     try appendAccountWithUsage(gpa, &reg, "free@example.com", .{
-        .primary = .{ .used_percent = 70.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 20.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .free,
@@ -690,14 +721,13 @@ test "Scenario: Given free account near exhaustion when checking current then re
     defer gpa.free(active_account_key);
     try registry.setActiveAccountKey(gpa, &reg, active_account_key);
 
-    try std.testing.expect(auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
+    try std.testing.expect(!auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
 }
 
-test "Scenario: Given stricter weekly threshold when checking current then default trigger can be suppressed" {
+test "Scenario: Given weekly remaining is non-zero when checking current then it does not switch early" {
     const gpa = std.testing.allocator;
     var reg = bdd.makeEmptyRegistry();
     defer reg.deinit(gpa);
-    reg.auto_switch.threshold_weekly_percent = 3;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
         .primary = .{ .used_percent = 20.0, .window_minutes = 300, .resets_at = null },
@@ -710,20 +740,6 @@ test "Scenario: Given stricter weekly threshold when checking current then defau
     try registry.setActiveAccountKey(gpa, &reg, active_account_key);
 
     try std.testing.expect(!auto.shouldSwitchCurrent(&reg, std.time.timestamp()));
-}
-
-test "Scenario: Given threshold overrides when applying config then unspecified values stay unchanged" {
-    var cfg = registry.defaultAutoSwitchConfig();
-    cfg.threshold_5h_percent = 11;
-    cfg.threshold_weekly_percent = 7;
-
-    auto.applyThresholdConfig(&cfg, .{
-        .threshold_5h_percent = 13,
-        .threshold_weekly_percent = null,
-    });
-
-    try std.testing.expect(cfg.threshold_5h_percent == 13);
-    try std.testing.expect(cfg.threshold_weekly_percent == 7);
 }
 
 test "Scenario: Given better candidate when auto switch runs then auth and active account move silently" {
@@ -740,7 +756,7 @@ test "Scenario: Given better candidate when auto switch runs then auth and activ
     reg.auto_switch.enabled = true;
 
     try appendAccountWithUsage(gpa, &reg, "low@example.com", .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 10.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
@@ -792,7 +808,7 @@ test "Scenario: Given API mode and unknown candidate usage when auto switching t
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "low@example.com", .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 10.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
@@ -846,7 +862,7 @@ test "Scenario: Given API mode and poor refreshed candidate when auto switching 
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "low@example.com", .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 10.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
@@ -892,7 +908,7 @@ test "Scenario: Given repeated daemon candidate refresh attempts within cooldown
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "low@example.com", .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 10.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = null,
@@ -945,7 +961,7 @@ test "Scenario: Given switch-time candidate validation returns non-200 then that
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 90.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -991,7 +1007,7 @@ test "Scenario: Given switch-time candidate validation returns 200 without windo
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 90.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -1037,7 +1053,7 @@ test "Scenario: Given a candidate is rejected by API validation then it stays re
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 90.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -1087,7 +1103,7 @@ test "Scenario: Given switch-time candidate validation reports missing auth then
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 90.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -1133,7 +1149,7 @@ test "Scenario: Given switch-time candidate validation gets no response then the
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 90.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -1179,7 +1195,7 @@ test "Scenario: Given daemon api mode and an api-key candidate when auto switchi
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 99.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 90.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -1294,7 +1310,7 @@ test "Scenario: Given stale top candidates when daemon switches then it validate
     reg.api.usage = true;
 
     try appendAccountWithUsage(gpa, &reg, "active@example.com", .{
-        .primary = .{ .used_percent = 96.0, .window_minutes = 300, .resets_at = null },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = null },
         .secondary = .{ .used_percent = 70.0, .window_minutes = 10080, .resets_at = null },
         .credits = null,
         .plan_type = .pro,
@@ -1593,8 +1609,6 @@ test "Scenario: Given status when rendering then auto and usage api settings are
     try auto.writeStatus(&aw.writer, .{
         .enabled = true,
         .runtime = .running,
-        .threshold_5h_percent = 12,
-        .threshold_weekly_percent = 8,
         .api_usage_enabled = false,
         .api_account_enabled = false,
     });
@@ -1602,7 +1616,7 @@ test "Scenario: Given status when rendering then auto and usage api settings are
     const output = aw.written();
     try std.testing.expect(std.mem.indexOf(u8, output, "auto-switch: ON") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "service: running") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "thresholds: 5h<12%, weekly<8%") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "thresholds:") == null);
     try std.testing.expect(std.mem.indexOf(u8, output, "usage: local") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "account: disabled") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Warning: Usage refresh is currently using the ChatGPT usage API") == null);
@@ -1616,8 +1630,6 @@ test "Scenario: Given api usage mode when rendering status body then risk warnin
     try auto.writeStatus(&aw.writer, .{
         .enabled = true,
         .runtime = .running,
-        .threshold_5h_percent = 12,
-        .threshold_weekly_percent = 8,
         .api_usage_enabled = true,
         .api_account_enabled = true,
     });

@@ -315,8 +315,6 @@ test "Scenario: Given purge import with file when rebuilding then current auth i
     defer loaded.deinit(gpa);
     try std.testing.expect(loaded.accounts.items.len == 2);
     try std.testing.expect(loaded.auto_switch.enabled);
-    try std.testing.expectEqual(@as(u8, 12), loaded.auto_switch.threshold_5h_percent);
-    try std.testing.expectEqual(@as(u8, 7), loaded.auto_switch.threshold_weekly_percent);
     try std.testing.expect(loaded.api.usage);
     try std.testing.expect(loaded.api.account);
     try std.testing.expect(loaded.active_account_activated_at_ms != null);
@@ -384,8 +382,6 @@ test "Scenario: Given purge with newer schema registry when rebuilding then auto
     var loaded = try registry.loadRegistry(gpa, codex_home);
     defer loaded.deinit(gpa);
     try std.testing.expect(loaded.auto_switch.enabled);
-    try std.testing.expectEqual(@as(u8, 18), loaded.auto_switch.threshold_5h_percent);
-    try std.testing.expectEqual(@as(u8, 6), loaded.auto_switch.threshold_weekly_percent);
     try std.testing.expect(loaded.api.usage);
     try std.testing.expect(loaded.api.account);
 }
@@ -430,8 +426,6 @@ test "Scenario: Given purge with malformed registry when rebuilding then auto an
     var loaded = try registry.loadRegistry(gpa, codex_home);
     defer loaded.deinit(gpa);
     try std.testing.expect(loaded.auto_switch.enabled);
-    try std.testing.expectEqual(@as(u8, 13), loaded.auto_switch.threshold_5h_percent);
-    try std.testing.expectEqual(@as(u8, 4), loaded.auto_switch.threshold_weekly_percent);
     try std.testing.expect(loaded.api.usage);
     try std.testing.expect(loaded.api.account);
 }

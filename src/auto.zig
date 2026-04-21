@@ -2507,7 +2507,7 @@ test "candidate index refreshes cached ranking after a reset window expires" {
 
     const reset_idx = registry.findAccountIndexByAccountKey(&reg, reset_account_key) orelse return error.TestExpectedEqual;
     reg.accounts.items[reset_idx].last_usage = .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = 300, .resets_at = 1010 },
+        .primary = .{ .used_percent = 100.0, .window_minutes = 300, .resets_at = 1010 },
         .secondary = null,
         .credits = null,
         .plan_type = .pro,

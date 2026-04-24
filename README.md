@@ -113,6 +113,7 @@ Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth-auto.exe" -Force -Error
 | Command | Description |
 |---------|-------------|
 | `codex-auth config auto enable\|disable` | Enable or disable experimental background auto-switching |
+| `codex-auth config auto [--5h <%>] [--weekly <%>]` | Set experimental auto-switch thresholds |
 | `codex-auth config api enable\|disable` | Enable or disable both usage refresh and team name refresh API calls |
 
 ---
@@ -235,12 +236,18 @@ codex-auth config auto disable
 
 `config auto enable` prints the current usage mode after installing the watcher, so you can immediately see whether auto-switch is running with default API-backed usage or local-only fallback semantics.
 
+Adjust thresholds:
+
+```shell
+codex-auth config auto --5h 12
+codex-auth config auto --5h 12 --weekly 8
+codex-auth config auto --weekly 8
+```
+
 When auto-switching is enabled, a long-running background watcher refreshes the active account's usage and silently switches accounts when:
 
-- 5h remaining reaches `0`, or
-- weekly remaining reaches `0`
-
-When choosing the next account, `codex-auth` prefers a usable account whose remaining quota resets sooner, so a reset at `05:11` wins over `05:30`.
+- 5h remaining drops below the configured 5h threshold (default `10%`), or
+- weekly remaining drops below the configured weekly threshold (default `5%`)
 
 The managed background worker is long-running on all supported platforms:
 

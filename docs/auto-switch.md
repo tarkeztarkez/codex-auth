@@ -8,12 +8,15 @@ User-facing commands:
 
 - `codex-auth config auto enable`
 - `codex-auth config auto disable`
+- `codex-auth config auto [--5h <percent>] [--weekly <percent>]`
 - `codex-auth config api enable`
 - `codex-auth config api disable`
 
 Stored registry fields:
 
 - `auto_switch.enabled`
+- `auto_switch.threshold_5h_percent`
+- `auto_switch.threshold_weekly_percent`
 - `api.usage`
 
 The feature is off by default.
@@ -66,12 +69,14 @@ Local rollout attribution rules are unchanged:
 
 ## Switching Rules
 
-The watcher switches without foreground CLI output when the active account has an exhausted tracked window:
+The watcher switches without foreground CLI output when the active account drops below either threshold:
 
-- `5h remaining == 0`
-- `weekly remaining == 0`
+- `5h remaining < auto_switch.threshold_5h_percent`
+- `weekly remaining < auto_switch.threshold_weekly_percent`
 
-When choosing the next account, the watcher prefers a usable account whose remaining quota resets sooner. For example, a reset at `05:11` wins over `05:30`.
+There is one extra near-real-time safety rule for free plans:
+
+- when the 5h trigger comes from an actual 300-minute window or an unlabeled primary window, the effective 5h threshold for `free` accounts is `max(configured_5h_threshold, 35%)`
 
 This higher floor exists because free accounts can burn through the last visible quota much faster than once-per-minute checks can react.
 

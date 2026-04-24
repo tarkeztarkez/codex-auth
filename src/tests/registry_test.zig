@@ -275,6 +275,8 @@ test "registry save/load" {
     const active_account_key = try accountKeyForEmailAlloc(gpa, "a@b.com");
     defer gpa.free(active_account_key);
     try registry.setActiveAccountKey(gpa, &reg, active_account_key);
+    reg.auto_switch.threshold_5h_percent = 12;
+    reg.auto_switch.threshold_weekly_percent = 8;
     reg.api.usage = true;
     try registry.setAccountLastLocalRollout(gpa, &reg.accounts.items[0], "/tmp/sessions/run-1/rollout-a.jsonl", 1735689600000);
 
@@ -289,6 +291,8 @@ test "registry save/load" {
     var loaded = try registry.loadRegistry(gpa, codex_home);
     defer loaded.deinit(gpa);
     try std.testing.expect(loaded.accounts.items.len == 1);
+    try std.testing.expect(loaded.auto_switch.threshold_5h_percent == 12);
+    try std.testing.expect(loaded.auto_switch.threshold_weekly_percent == 8);
     try std.testing.expect(loaded.api.usage);
     try std.testing.expect(loaded.api.account);
     try std.testing.expect(loaded.active_account_activated_at_ms != null);
@@ -551,6 +555,8 @@ test "registry load defaults missing auto threshold fields" {
     var loaded = try registry.loadRegistry(gpa, codex_home);
     defer loaded.deinit(gpa);
     try std.testing.expect(loaded.auto_switch.enabled);
+    try std.testing.expect(loaded.auto_switch.threshold_5h_percent == registry.default_auto_switch_threshold_5h_percent);
+    try std.testing.expect(loaded.auto_switch.threshold_weekly_percent == registry.default_auto_switch_threshold_weekly_percent);
     try std.testing.expect(loaded.api.usage);
     try std.testing.expect(loaded.api.account);
     try std.testing.expect(loaded.active_account_activated_at_ms == null);

@@ -25,11 +25,14 @@ const windows_task_execution_time_limit_xml = "PT0S";
 const lock_file_name = "auto-switch.lock";
 const watch_poll_interval_ns = 1 * std.time.ns_per_s;
 const api_refresh_interval_ns = 60 * std.time.ns_per_s;
+const free_plan_realtime_guard_5h_percent: i64 = 35;
 pub const RuntimeState = enum { running, stopped, unknown };
 
 pub const Status = struct {
     enabled: bool,
     runtime: RuntimeState,
+    threshold_5h_percent: u8,
+    threshold_weekly_percent: u8,
     api_usage_enabled: bool,
     api_account_enabled: bool,
 };
@@ -45,7 +48,6 @@ pub const AutoSwitchAttempt = struct {
 
 const CandidateScore = struct {
     value: i64,
-    preferred_reset_at: ?i64,
     last_usage_at: i64,
     created_at: i64,
 };
@@ -539,6 +541,8 @@ pub fn getStatus(allocator: std.mem.Allocator, codex_home: []const u8) !Status {
     return .{
         .enabled = reg.auto_switch.enabled,
         .runtime = queryRuntimeState(allocator),
+        .threshold_5h_percent = reg.auto_switch.threshold_5h_percent,
+        .threshold_weekly_percent = reg.auto_switch.threshold_weekly_percent,
         .api_usage_enabled = reg.api.usage,
         .api_account_enabled = reg.api.account,
     };
@@ -556,6 +560,13 @@ fn writeStatusWithColor(out: *std.Io.Writer, status: Status, use_color: bool) !v
 
     try out.writeAll("service: ");
     try out.writeAll(@tagName(status.runtime));
+    try out.writeAll("\n");
+
+    try out.writeAll("thresholds: ");
+    try out.print(
+        "5h<{d}%, weekly<{d}%",
+        .{ status.threshold_5h_percent, status.threshold_weekly_percent },
+    );
     try out.writeAll("\n");
 
     try out.writeAll("usage: ");
@@ -746,6 +757,7 @@ pub fn handleAutoCommand(allocator: std.mem.Allocator, codex_home: []const u8, c
             .enable => try enable(allocator, codex_home),
             .disable => try disable(allocator, codex_home),
         },
+        .configure => |opts| try configureThresholds(allocator, codex_home, opts),
     }
 }
 
@@ -1269,11 +1281,19 @@ pub fn shouldSwitchCurrent(reg: *registry.Registry, now: i64) bool {
     const idx = registry.findAccountIndexByAccountKey(reg, account_key) orelse return false;
     const rec = &reg.accounts.items[idx];
     const resolved_5h = resolve5hTriggerWindow(rec.last_usage);
+    const threshold_5h_percent = effective5hThresholdPercent(reg, rec, resolved_5h.allow_free_guard);
     const rem_5h = registry.remainingPercentAt(resolved_5h.window, now);
     const rem_week = registry.remainingPercentAt(registry.resolveRateWindow(rec.last_usage, 10080, false), now);
-    _ = resolved_5h.allow_free_guard;
-    return (rem_5h != null and rem_5h.? == 0) or
-        (rem_week != null and rem_week.? == 0);
+    return (rem_5h != null and rem_5h.? < threshold_5h_percent) or
+        (rem_week != null and rem_week.? < @as(i64, reg.auto_switch.threshold_weekly_percent));
+}
+
+fn effective5hThresholdPercent(reg: *registry.Registry, rec: *const registry.AccountRecord, allow_free_guard: bool) i64 {
+    var threshold = @as(i64, reg.auto_switch.threshold_5h_percent);
+    if (allow_free_guard and registry.resolvePlan(rec) == .free) {
+        threshold = @max(threshold, free_plan_realtime_guard_5h_percent);
+    }
+    return threshold;
 }
 
 pub fn maybeAutoSwitch(allocator: std.mem.Allocator, codex_home: []const u8, reg: *registry.Registry) !bool {
@@ -1865,48 +1885,36 @@ fn disable(allocator: std.mem.Allocator, codex_home: []const u8) !void {
     try uninstallService(allocator, codex_home);
 }
 
+pub fn applyThresholdConfig(cfg: *registry.AutoSwitchConfig, opts: cli.AutoThresholdOptions) void {
+    if (opts.threshold_5h_percent) |value| {
+        cfg.threshold_5h_percent = value;
+    }
+    if (opts.threshold_weekly_percent) |value| {
+        cfg.threshold_weekly_percent = value;
+    }
+}
+
+fn configureThresholds(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.AutoThresholdOptions) !void {
+    var reg = try registry.loadRegistry(allocator, codex_home);
+    defer reg.deinit(allocator);
+    applyThresholdConfig(&reg.auto_switch, opts);
+    try registry.saveRegistry(allocator, codex_home, &reg);
+    try printStatus(allocator, codex_home);
+}
+
 fn candidateScore(rec: *const registry.AccountRecord, now: i64) CandidateScore {
-    const usage_score = registry.usageScoreAt(rec.last_usage, now) orelse 101;
+    const usage_score = registry.usageScoreAt(rec.last_usage, now) orelse 100;
     return .{
         .value = usage_score,
-        .preferred_reset_at = candidatePreferredResetAt(rec.last_usage, now),
         .last_usage_at = rec.last_usage_at orelse -1,
         .created_at = rec.created_at,
     };
 }
 
 fn candidateBetter(a: CandidateScore, b: CandidateScore) bool {
-    const a_has_quota = a.value > 0;
-    const b_has_quota = b.value > 0;
-    if (a_has_quota != b_has_quota) return a_has_quota;
-    if (a_has_quota and b_has_quota) {
-        if (a.preferred_reset_at != null or b.preferred_reset_at != null) {
-            if (a.preferred_reset_at == null) return false;
-            if (b.preferred_reset_at == null) return true;
-            if (a.preferred_reset_at.? != b.preferred_reset_at.?) return a.preferred_reset_at.? < b.preferred_reset_at.?;
-        }
-    }
     if (a.value != b.value) return a.value > b.value;
     if (a.last_usage_at != b.last_usage_at) return a.last_usage_at > b.last_usage_at;
     return a.created_at > b.created_at;
-}
-
-fn candidatePreferredResetAt(usage: ?registry.RateLimitSnapshot, now: i64) ?i64 {
-    var preferred_reset_at: ?i64 = null;
-    const resolved_5h = resolve5hTriggerWindow(usage);
-    preferred_reset_at = earlierFutureTimestamp(preferred_reset_at, usableWindowResetAt(resolved_5h.window, now), now);
-    preferred_reset_at = earlierFutureTimestamp(
-        preferred_reset_at,
-        usableWindowResetAt(registry.resolveRateWindow(usage, 10080, false), now),
-        now,
-    );
-    return preferred_reset_at;
-}
-
-fn usableWindowResetAt(window: ?registry.RateLimitWindow, now: i64) ?i64 {
-    const remaining = registry.remainingPercentAt(window, now) orelse return null;
-    if (remaining == 0) return null;
-    return window.?.resets_at;
 }
 
 fn candidateScoreChangeAt(usage: ?registry.RateLimitSnapshot, now: i64) ?i64 {

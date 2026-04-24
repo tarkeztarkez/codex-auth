@@ -9,6 +9,8 @@ pub const PlanType = enum { free, plus, prolite, pro, team, business, enterprise
 pub const AuthMode = enum { chatgpt, apikey };
 pub const current_schema_version: u32 = 3;
 pub const min_supported_schema_version: u32 = 2;
+pub const default_auto_switch_threshold_5h_percent: u8 = 10;
+pub const default_auto_switch_threshold_weekly_percent: u8 = 5;
 pub const account_name_refresh_lock_file_name = "account-name-refresh.lock";
 
 fn normalizeEmailAlloc(allocator: std.mem.Allocator, email: []const u8) ![]u8 {
@@ -45,6 +47,8 @@ pub const RolloutSignature = struct {
 
 pub const AutoSwitchConfig = struct {
     enabled: bool = false,
+    threshold_5h_percent: u8 = default_auto_switch_threshold_5h_percent,
+    threshold_weekly_percent: u8 = default_auto_switch_threshold_weekly_percent,
 };
 
 pub const ApiConfig = struct {
@@ -2635,6 +2639,16 @@ fn parseAutoSwitch(allocator: std.mem.Allocator, cfg: *AutoSwitchConfig, v: std.
             else => {},
         }
     }
+    if (obj.get("threshold_5h_percent")) |threshold| {
+        if (parseThresholdPercent(threshold)) |value| {
+            cfg.threshold_5h_percent = value;
+        }
+    }
+    if (obj.get("threshold_weekly_percent")) |threshold| {
+        if (parseThresholdPercent(threshold)) |value| {
+            cfg.threshold_weekly_percent = value;
+        }
+    }
 }
 
 fn parseApiConfig(cfg: *ApiConfig, v: std.json.Value) void {
@@ -2746,6 +2760,15 @@ fn readInt(v: ?std.json.Value) ?i64 {
         .integer => |i| return i,
         else => return null,
     }
+}
+
+fn parseThresholdPercent(v: std.json.Value) ?u8 {
+    const raw = switch (v) {
+        .integer => |i| i,
+        else => return null,
+    };
+    if (raw < 1 or raw > 100) return null;
+    return @as(u8, @intCast(raw));
 }
 
 pub fn autoImportActiveAuth(allocator: std.mem.Allocator, codex_home: []const u8, reg: *Registry) !bool {

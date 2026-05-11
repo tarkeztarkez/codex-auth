@@ -1155,6 +1155,10 @@ test "Scenario: Given API key import when listing with api refresh then stale sn
     defer gpa.free(registry_data);
     try std.testing.expect(std.mem.indexOf(u8, registry_data, api_key) == null);
 
+    registry.updateUsage(gpa, &loaded, api_account_key, makeUsageSnapshot(88, 66));
+    const api_idx = registry.findAccountIndexByAccountKey(&loaded, api_account_key) orelse return error.TestExpectedEqual;
+    loaded.accounts.items[api_idx].last_usage_at = 1;
+
     const chatgpt_email = "chatgpt-flow@example.com";
     try fixtures.appendAccount(gpa, &loaded, chatgpt_email, "chatgpt", .plus);
     const chatgpt_key = try fixtures.accountKeyForEmailAlloc(gpa, chatgpt_email);

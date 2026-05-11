@@ -17,6 +17,7 @@ This document describes the repository's CI, preview package publishing, and tag
    - Run `git switch main`.
    - Run `git pull --ff-only origin main`.
    - Confirm the latest completed `CI` run for `main` succeeded. If the latest `CI` run failed or is still in progress, stop and do not cut a release yet.
+   - Tag release is also gated in `.github/workflows/release.yml`: the latest completed full `CI` push run on `main` must have succeeded, and it must match the commit being released. Release-only `chore: release v<version>` commits are checked against their parent commit's full `CI` run.
 2. Decide the next version.
    - For a stable release, require the requester to provide the exact version. Do not infer stable versions automatically.
    - For a prerelease or test release, inspect the latest reachable release tag from `main`.

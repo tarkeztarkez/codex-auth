@@ -59,7 +59,7 @@ Detailed command documentation lives in [docs/commands/README.md](./docs/command
 
 | Command | Description |
 |---------|-------------|
-| [`codex-auth list [--live] [--api\|--skip-api]`](./docs/commands/list.md) | List stored accounts and usage state |
+| [`codex-auth list [--live] [--active] [--api\|--skip-api]`](./docs/commands/list.md) | List stored accounts and usage state |
 | [`codex-auth login [--device-auth]`](./docs/commands/login.md) | Run `codex login`, then add the current account |
 | [`codex-auth switch [--live] [--api\|--skip-api]`](./docs/commands/switch.md) | Switch the active account interactively |
 | [`codex-auth switch <query>`](./docs/commands/switch.md) | Switch directly by row number or account selector |
@@ -91,6 +91,7 @@ Detailed command documentation lives in [docs/commands/README.md](./docs/command
 
 ```shell
 codex-auth list
+codex-auth list --active
 codex-auth switch
 codex-auth switch 02
 codex-auth remove work

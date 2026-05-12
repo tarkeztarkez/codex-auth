@@ -15,7 +15,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Find response directory from env var or exe path.
     const response_dir = getResponseDir(init) orelse ".";
-    const response_file = if (arg_count > 4) "me_body_b64.txt" else "batch_body_b64.txt";
+    const response_file = if (isBatchRequest(init.minimal.args, gpa)) "batch_body_b64.txt" else "me_body_b64.txt";
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
@@ -57,6 +57,15 @@ fn checkVersion(args: std.process.Args, gpa: std.mem.Allocator) bool {
     _ = iter.next(); // skip exe
     const arg1 = iter.next() orelse return false;
     return std.mem.eql(u8, arg1, "--version");
+}
+
+fn isBatchRequest(args: std.process.Args, gpa: std.mem.Allocator) bool {
+    var iter = std.process.Args.Iterator.initAllocator(args, gpa) catch return false;
+    defer iter.deinit();
+    _ = iter.next(); // skip exe
+    _ = iter.next(); // skip -e
+    const script = iter.next() orelse return false;
+    return std.mem.indexOf(u8, script, "requests") != null;
 }
 
 fn getResponseDir(init: std.process.Init) ?[]const u8 {

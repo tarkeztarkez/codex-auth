@@ -290,7 +290,7 @@ pub fn resolveSelectedIndex(
 ) !?usize {
     if (rows.selectable_row_indices.len == 0) return null;
     const selected_idx = if (selected_account_key.*) |key|
-        picker.selectableIndexForAccountKey(rows, reg, key) orelse picker.activeSelectableIndex(rows) orelse 0
+        picker.selectableIndexForAccountKey(rows, reg, key) orelse 0
     else
         picker.activeSelectableIndex(rows) orelse 0;
     try picker.replaceSelectedAccountKeyForSelectable(allocator, selected_account_key, rows, reg, selected_idx);

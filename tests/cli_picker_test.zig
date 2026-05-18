@@ -919,6 +919,59 @@ test "Scenario: Given live switch navigation shortcuts when an account is unavai
     try std.testing.expectEqualStrings("user-1::acc-1", selected_account_key.?);
 }
 
+test "Scenario: Given a stale live cursor key when resolving then switch does not snap back to active" {
+    const gpa = std.testing.allocator;
+    var reg = makeTestRegistry();
+    defer reg.deinit(gpa);
+
+    try appendTestAccount(gpa, &reg, "user-1::acc-1", "active@example.com", "", .team);
+    try appendTestAccount(gpa, &reg, "user-1::acc-2", "second@example.com", "", .team);
+    try appendTestAccount(gpa, &reg, "user-1::acc-3", "third@example.com", "", .team);
+    reg.active_account_key = try gpa.dupe(u8, "user-1::acc-2");
+
+    var rows = try live_tui.buildSelectableRows(gpa, .{
+        .reg = &reg,
+        .usage_overrides = null,
+    });
+    defer rows.deinit(gpa);
+
+    var selected_account_key: ?[]u8 = try gpa.dupe(u8, "user-1::missing");
+    defer if (selected_account_key) |key| gpa.free(key);
+
+    const resolved_idx = try live_tui.resolveSelectedIndex(gpa, &selected_account_key, &rows, &reg);
+    try std.testing.expectEqual(@as(?usize, 0), resolved_idx);
+    try std.testing.expectEqualStrings("user-1::acc-1", selected_account_key.?);
+
+    try std.testing.expect(try live_tui.moveSelectedIndexForKey(gpa, &selected_account_key, &rows, &reg, TuiInputKey.move_down));
+    try std.testing.expectEqualStrings("user-1::acc-2", selected_account_key.?);
+}
+
+test "Scenario: Given active first account when navigating live switch then adjacent accounts are not skipped" {
+    const gpa = std.testing.allocator;
+    var reg = makeTestRegistry();
+    defer reg.deinit(gpa);
+
+    try appendTestAccount(gpa, &reg, "user-1::acc-1", "active@example.com", "", .team);
+    try appendTestAccount(gpa, &reg, "user-1::acc-2", "second@example.com", "", .team);
+    try appendTestAccount(gpa, &reg, "user-1::acc-3", "third@example.com", "", .team);
+    reg.active_account_key = try gpa.dupe(u8, "user-1::acc-1");
+
+    var rows = try live_tui.buildSelectableRows(gpa, .{
+        .reg = &reg,
+        .usage_overrides = null,
+    });
+    defer rows.deinit(gpa);
+
+    var selected_account_key: ?[]u8 = try gpa.dupe(u8, "user-1::acc-3");
+    defer if (selected_account_key) |key| gpa.free(key);
+
+    try std.testing.expect(try live_tui.moveSelectedIndexForKey(gpa, &selected_account_key, &rows, &reg, TuiInputKey.keyboard_up));
+    try std.testing.expectEqualStrings("user-1::acc-2", selected_account_key.?);
+
+    try std.testing.expect(try live_tui.moveSelectedIndexForKey(gpa, &selected_account_key, &rows, &reg, TuiInputKey.keyboard_up));
+    try std.testing.expectEqualStrings("user-1::acc-1", selected_account_key.?);
+}
+
 test "Scenario: Given live auto switch state when starting then the initial display triggers auto-switch once" {
     var enabled = live_tui.LiveAutoSwitchState.init(true);
     try std.testing.expect(enabled.takePending());

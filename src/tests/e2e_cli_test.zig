@@ -109,6 +109,7 @@ fn writeSuccessfulFakeCodex(dir: std.fs.Dir) !void {
         if (builtin.os.tag == .windows)
             "@echo off\r\n" ++
                 ">\"%HOME%\\fake-codex-argv.txt\" echo %*\r\n" ++
+                ">\"%HOME%\\fake-codex-home.txt\" echo %CODEX_HOME%\r\n" ++
                 "set \"CODEX_HOME_DIR=%CODEX_HOME%\"\r\n" ++
                 "if \"%CODEX_HOME_DIR%\"==\"\" set \"CODEX_HOME_DIR=%HOME%\\.codex\"\r\n" ++
                 "if not exist \"%CODEX_HOME_DIR%\" mkdir \"%CODEX_HOME_DIR%\"\r\n" ++
@@ -117,8 +118,38 @@ fn writeSuccessfulFakeCodex(dir: std.fs.Dir) !void {
         else
             "#!/bin/sh\n" ++
                 "printf '%s\\n' \"$*\" > \"$HOME/fake-codex-argv.txt\"\n" ++
+                "printf '%s\\n' \"$CODEX_HOME\" > \"$HOME/fake-codex-home.txt\"\n" ++
                 "CODEX_HOME_DIR=\"${CODEX_HOME:-$HOME/.codex}\"\n" ++
                 "mkdir -p \"$CODEX_HOME_DIR\"\n" ++
+                "cp \"$HOME/fake-auth.json\" \"$CODEX_HOME_DIR/auth.json\"\n" ++
+                "exit 0\n";
+    const sub_path = fakeCodexCommandPath();
+    try dir.writeFile(.{ .sub_path = sub_path, .data = script });
+
+    if (builtin.os.tag != .windows) {
+        var file = try dir.openFile(sub_path, .{ .mode = .read_write });
+        defer file.close();
+        try file.chmod(0o755);
+    }
+}
+
+fn writeStrictExistingCodexHomeFakeCodex(dir: std.fs.Dir) !void {
+    const script =
+        if (builtin.os.tag == .windows)
+            "@echo off\r\n" ++
+                ">\"%HOME%\\fake-codex-argv.txt\" echo %*\r\n" ++
+                ">\"%HOME%\\fake-codex-home.txt\" echo %CODEX_HOME%\r\n" ++
+                "set \"CODEX_HOME_DIR=%CODEX_HOME%\"\r\n" ++
+                "if \"%CODEX_HOME_DIR%\"==\"\" set \"CODEX_HOME_DIR=%HOME%\\.codex\"\r\n" ++
+                "if not exist \"%CODEX_HOME_DIR%\" exit /b 42\r\n" ++
+                "copy /Y \"%HOME%\\fake-auth.json\" \"%CODEX_HOME_DIR%\\auth.json\" >NUL\r\n" ++
+                "exit /b 0\r\n"
+        else
+            "#!/bin/sh\n" ++
+                "printf '%s\\n' \"$*\" > \"$HOME/fake-codex-argv.txt\"\n" ++
+                "printf '%s\\n' \"$CODEX_HOME\" > \"$HOME/fake-codex-home.txt\"\n" ++
+                "CODEX_HOME_DIR=\"${CODEX_HOME:-$HOME/.codex}\"\n" ++
+                "[ -d \"$CODEX_HOME_DIR\" ] || exit 42\n" ++
                 "cp \"$HOME/fake-auth.json\" \"$CODEX_HOME_DIR/auth.json\"\n" ++
                 "exit 0\n";
     const sub_path = fakeCodexCommandPath();
@@ -433,7 +464,7 @@ test "Scenario: Given device auth login when running login then it forwards the 
     const fake_auth = try bdd.authJsonWithEmailPlan(gpa, expected_email, "plus");
     defer gpa.free(fake_auth);
     try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
-    try writeSuccessfulFakeCodex(tmp.dir);
+    try writeStrictExistingCodexHomeFakeCodex(tmp.dir);
 
     const fake_bin_path = try std.fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
     defer gpa.free(fake_bin_path);
@@ -506,7 +537,7 @@ test "Scenario: Given CODEX_HOME override when running login then it stores auth
     const fake_auth = try bdd.authJsonWithEmailPlan(gpa, expected_email, "plus");
     defer gpa.free(fake_auth);
     try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
-    try writeSuccessfulFakeCodex(tmp.dir);
+    try writeStrictExistingCodexHomeFakeCodex(tmp.dir);
 
     const fake_bin_path = try std.fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
     defer gpa.free(fake_bin_path);
@@ -562,7 +593,7 @@ test "Scenario: Given existing active auth when login succeeds then upstream log
     const fake_auth = try bdd.authJsonWithEmailPlan(gpa, expected_email, "pro");
     defer gpa.free(fake_auth);
     try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
-    try writeSuccessfulFakeCodex(tmp.dir);
+    try writeStrictExistingCodexHomeFakeCodex(tmp.dir);
 
     const fake_bin_path = try std.fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
     defer gpa.free(fake_bin_path);
@@ -611,6 +642,62 @@ test "Scenario: Given existing active auth when login succeeds then upstream log
     const existing_snapshot_data = try bdd.readFileAlloc(gpa, existing_snapshot_path);
     defer gpa.free(existing_snapshot_data);
     try std.testing.expectEqualStrings(existing_auth, existing_snapshot_data);
+}
+
+test "Scenario: Given login when running codex login then scratch home is under accounts cache" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath("fake-bin");
+
+    const expected_email = "new-login@example.com";
+    const fake_auth = try bdd.authJsonWithEmailPlan(gpa, expected_email, "pro");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try writeStrictExistingCodexHomeFakeCodex(tmp.dir);
+
+    const fake_bin_path = try std.fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
+    defer gpa.free(fake_bin_path);
+    const path_override = try prependPathEntryAlloc(gpa, fake_bin_path);
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const fake_codex_home_path = try std.fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-home.txt" });
+    defer gpa.free(fake_codex_home_path);
+    const fake_codex_home_data = try bdd.readFileAlloc(gpa, fake_codex_home_path);
+    defer gpa.free(fake_codex_home_data);
+    const fake_codex_home = std.mem.trim(u8, fake_codex_home_data, " \r\n");
+
+    const codex_home = try codexHomeAlloc(gpa, home_root);
+    defer gpa.free(codex_home);
+    const accounts_dir = try std.fs.path.join(gpa, &[_][]const u8{ codex_home, "accounts" });
+    defer gpa.free(accounts_dir);
+    try std.testing.expect(std.mem.startsWith(u8, fake_codex_home, accounts_dir));
+    try std.testing.expect(std.mem.indexOf(u8, fake_codex_home, "login-") != null);
+    try std.testing.expectError(error.FileNotFound, std.fs.cwd().access(fake_codex_home, .{}));
+
+    var loaded = try registry.loadRegistry(gpa, codex_home);
+    defer loaded.deinit(gpa);
+    try std.testing.expectEqual(@as(usize, 1), loaded.accounts.items.len);
+    try std.testing.expectEqualStrings(expected_email, loaded.accounts.items[0].email);
 }
 
 test "Scenario: Given failed device auth login with existing auth json when running login then it forwards the flag and does not mutate the registry" {

@@ -62,12 +62,14 @@ pub fn resolveWindowsCodexPathEntriesWithPathExtAlloc(
     entries: []const []const u8,
     path_ext: []const u8,
 ) !?WindowsCodexPath {
-    for (entries) |entry| {
-        if (entry.len == 0) continue;
-        if (try resolveWindowsCodexPathEntryWithPathExtAlloc(allocator, entry, path_ext)) |resolved| return resolved;
-    }
+    var candidates = try collectWindowsCodexPathEntriesWithPathExtAlloc(allocator, entries, path_ext);
+    errdefer deinitWindowsCodexPathList(allocator, &candidates);
 
-    return null;
+    if (candidates.items.len == 0) return null;
+
+    const resolved = candidates.orderedRemove(0);
+    deinitWindowsCodexPathList(allocator, &candidates);
+    return resolved;
 }
 
 pub fn resolveWindowsCodexPathEntriesAlloc(
@@ -130,7 +132,8 @@ fn appendWindowsCodexPathCandidateIfAvailable(
 
 fn appendWindowsCodexPathEntryCandidatesAlloc(
     allocator: std.mem.Allocator,
-    candidates: *WindowsCodexPathList,
+    native_candidates: *WindowsCodexPathList,
+    ps1_candidates: *WindowsCodexPathList,
     entry: []const u8,
     path_ext: []const u8,
 ) !void {
@@ -152,10 +155,10 @@ fn appendWindowsCodexPathEntryCandidatesAlloc(
             },
             .ps1 => unreachable,
         }
-        try appendWindowsCodexPathCandidateIfAvailable(allocator, candidates, entry, kind);
+        try appendWindowsCodexPathCandidateIfAvailable(allocator, native_candidates, entry, kind);
     }
 
-    try appendWindowsCodexPathCandidateIfAvailable(allocator, candidates, entry, .ps1);
+    try appendWindowsCodexPathCandidateIfAvailable(allocator, ps1_candidates, entry, .ps1);
 }
 
 fn deinitWindowsCodexPathList(allocator: std.mem.Allocator, candidates: *WindowsCodexPathList) void {
@@ -163,15 +166,53 @@ fn deinitWindowsCodexPathList(allocator: std.mem.Allocator, candidates: *Windows
     candidates.deinit(allocator);
 }
 
+fn appendWindowsCodexPathLists(
+    allocator: std.mem.Allocator,
+    dst: *WindowsCodexPathList,
+    src: *WindowsCodexPathList,
+) !void {
+    try dst.appendSlice(allocator, src.items);
+    src.clearRetainingCapacity();
+}
+
+fn collectWindowsCodexPathEntriesWithPathExtAlloc(
+    allocator: std.mem.Allocator,
+    entries: []const []const u8,
+    path_ext: []const u8,
+) !WindowsCodexPathList {
+    var native_candidates: WindowsCodexPathList = .empty;
+    errdefer deinitWindowsCodexPathList(allocator, &native_candidates);
+    var ps1_candidates: WindowsCodexPathList = .empty;
+    errdefer deinitWindowsCodexPathList(allocator, &ps1_candidates);
+
+    for (entries) |entry| {
+        if (entry.len == 0) continue;
+        try appendWindowsCodexPathEntryCandidatesAlloc(
+            allocator,
+            &native_candidates,
+            &ps1_candidates,
+            entry,
+            path_ext,
+        );
+    }
+
+    try appendWindowsCodexPathLists(allocator, &native_candidates, &ps1_candidates);
+    ps1_candidates.deinit(allocator);
+    return native_candidates;
+}
+
 fn resolveWindowsCodexPathEntryWithPathExtAlloc(
     allocator: std.mem.Allocator,
     entry: []const u8,
     path_ext: []const u8,
 ) !?WindowsCodexPath {
-    var candidates: WindowsCodexPathList = .empty;
+    var candidates = try collectWindowsCodexPathEntriesWithPathExtAlloc(
+        allocator,
+        &[_][]const u8{entry},
+        path_ext,
+    );
     errdefer deinitWindowsCodexPathList(allocator, &candidates);
 
-    try appendWindowsCodexPathEntryCandidatesAlloc(allocator, &candidates, entry, path_ext);
     if (candidates.items.len == 0) return null;
 
     const resolved = candidates.orderedRemove(0);
@@ -193,12 +234,19 @@ fn resolveWindowsCodexPathValueAlloc(
     allocator: std.mem.Allocator,
     path_value: []const u8,
     path_ext: []const u8,
-    candidates: *WindowsCodexPathList,
+    native_candidates: *WindowsCodexPathList,
+    ps1_candidates: *WindowsCodexPathList,
 ) !void {
     var path_it = std.mem.splitScalar(u8, path_value, std.fs.path.delimiter);
     while (path_it.next()) |entry| {
         if (entry.len == 0) continue;
-        try appendWindowsCodexPathEntryCandidatesAlloc(allocator, candidates, entry, path_ext);
+        try appendWindowsCodexPathEntryCandidatesAlloc(
+            allocator,
+            native_candidates,
+            ps1_candidates,
+            entry,
+            path_ext,
+        );
     }
 }
 
@@ -206,19 +254,39 @@ fn collectWindowsCodexPathsAlloc(allocator: std.mem.Allocator) !WindowsCodexPath
     const path_ext = try resolveWindowsCodexPathExtAlloc(allocator);
     defer allocator.free(path_ext);
 
-    var candidates: WindowsCodexPathList = .empty;
-    errdefer deinitWindowsCodexPathList(allocator, &candidates);
+    var native_candidates: WindowsCodexPathList = .empty;
+    errdefer deinitWindowsCodexPathList(allocator, &native_candidates);
+    var ps1_candidates: WindowsCodexPathList = .empty;
+    errdefer deinitWindowsCodexPathList(allocator, &ps1_candidates);
 
-    try appendWindowsCodexPathEntryCandidatesAlloc(allocator, &candidates, ".", path_ext);
+    try appendWindowsCodexPathEntryCandidatesAlloc(
+        allocator,
+        &native_candidates,
+        &ps1_candidates,
+        ".",
+        path_ext,
+    );
 
     const path_value = http_env.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return candidates,
+        error.EnvironmentVariableNotFound => {
+            try appendWindowsCodexPathLists(allocator, &native_candidates, &ps1_candidates);
+            ps1_candidates.deinit(allocator);
+            return native_candidates;
+        },
         else => return err,
     };
     defer allocator.free(path_value);
 
-    try resolveWindowsCodexPathValueAlloc(allocator, path_value, path_ext, &candidates);
-    return candidates;
+    try resolveWindowsCodexPathValueAlloc(
+        allocator,
+        path_value,
+        path_ext,
+        &native_candidates,
+        &ps1_candidates,
+    );
+    try appendWindowsCodexPathLists(allocator, &native_candidates, &ps1_candidates);
+    ps1_candidates.deinit(allocator);
+    return native_candidates;
 }
 
 fn resolveOptionalExecutableAlloc(

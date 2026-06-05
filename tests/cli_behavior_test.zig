@@ -894,6 +894,35 @@ test "Scenario: Given both exe and cmd in one Windows directory when resolving t
     try std.testing.expect(std.mem.endsWith(u8, exe_first.path, "codex.exe"));
 }
 
+test "Scenario: Given an earlier PowerShell launcher and a later native Windows launcher when resolving then ps1 stays a global fallback" {
+    const gpa = std.testing.allocator;
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("npm-bin");
+    try tmp.dir.makePath("winget-bin");
+    try tmp.dir.writeFile(.{ .sub_path = "npm-bin/codex", .data = "#!/bin/sh\nexit 1\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "npm-bin/codex.ps1", .data = "exit 0\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "winget-bin/codex.exe", .data = "" });
+
+    const root_dir = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(root_dir);
+    const npm_dir = try std.fs.path.join(gpa, &[_][]const u8{ root_dir, "npm-bin" });
+    defer gpa.free(npm_dir);
+    const winget_dir = try std.fs.path.join(gpa, &[_][]const u8{ root_dir, "winget-bin" });
+    defer gpa.free(winget_dir);
+
+    var resolved = (try cli.login.resolveWindowsCodexPathEntriesWithPathExtAlloc(
+        gpa,
+        &[_][]const u8{ npm_dir, winget_dir },
+        ".EXE;.CMD",
+    )) orelse return error.TestUnexpectedResult;
+    defer resolved.deinit(gpa);
+
+    try std.testing.expectEqual(cli.login.WindowsCodexPathKind.exe, resolved.kind);
+    try std.testing.expect(std.mem.endsWith(u8, resolved.path, "codex.exe"));
+}
+
 test "Scenario: Given only PowerShell Windows launcher when resolving then ps1 is used after cmd is absent" {
     const gpa = std.testing.allocator;
     var tmp = fs.tmpDir(.{});

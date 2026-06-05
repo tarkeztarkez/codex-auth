@@ -821,6 +821,19 @@ test "Scenario: Given PowerShell is missing for the codex ps1 launcher when rend
     try std.testing.expect(std.mem.indexOf(u8, hint, "the `codex` executable was not found in your PATH.") == null);
 }
 
+test "Scenario: Given cmd is missing for the codex cmd launcher when rendering then the hint names cmd.exe" {
+    const gpa = std.testing.allocator;
+    var aw: std.Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+
+    try cli.output.writeCodexLoginLaunchFailureHintTo(&aw.writer, "CommandProcessorNotFound", false);
+
+    const hint = aw.written();
+    try std.testing.expect(std.mem.indexOf(u8, hint, "the `codex.cmd` launcher requires `cmd.exe`") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hint, "Restore `cmd.exe` to your PATH, or use a Codex CLI installation that provides `codex.exe`, then retry your command.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hint, "failed to launch the `codex login` process.") == null);
+}
+
 test "Scenario: Given login help when rendering then device auth usage is included" {
     const gpa = std.testing.allocator;
     var aw: std.Io.Writer.Allocating = .init(gpa);

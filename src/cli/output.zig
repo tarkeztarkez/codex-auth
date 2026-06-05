@@ -457,6 +457,10 @@ pub fn writeCodexLoginLaunchFailureHintTo(out: *std.Io.Writer, err_name: []const
         try writeHintPrefixTo(out, use_color);
         try out.writeAll(" Ensure the Codex CLI is installed and available in your environment.\n");
         try out.writeAll("      Then run `codex login` manually and retry your command.\n");
+    } else if (std.mem.eql(u8, err_name, "CommandProcessorNotFound")) {
+        try out.writeAll(" the `codex.cmd` launcher requires `cmd.exe`, but it was not found in your PATH.\n\n");
+        try writeHintPrefixTo(out, use_color);
+        try out.writeAll(" Restore `cmd.exe` to your PATH, or use a Codex CLI installation that provides `codex.exe`, then retry your command.\n");
     } else if (std.mem.eql(u8, err_name, "PowerShellNotFound")) {
         try out.writeAll(" the `codex.ps1` launcher requires PowerShell, but neither `powershell.exe` nor `pwsh.exe` was found in your PATH.\n\n");
         try writeHintPrefixTo(out, use_color);

@@ -40,6 +40,11 @@ const CodexLaunch = struct {
 
 const WindowsCodexPathList = std.ArrayList(WindowsCodexPath);
 
+const RetryableWindowsCodexBuildError = enum {
+    command_processor_not_found,
+    powershell_not_found,
+};
+
 pub fn codexLoginArgs(opts: types.LoginOptions) []const []const u8 {
     return if (opts.device_auth)
         &[_][]const u8{ "codex", "login", "--device-auth" }
@@ -400,10 +405,41 @@ fn writeCodexLoginLaunchFailureHint(err_name: []const u8) !void {
     try out.flush();
 }
 
-fn shouldRetryWindowsCodexLaunch(err: std.process.SpawnError, kind: WindowsCodexPathKind) bool {
-    _ = kind;
+fn retryableWindowsCodexBuildErrorName(err: RetryableWindowsCodexBuildError) []const u8 {
     return switch (err) {
-        error.FileNotFound, error.AccessDenied => true,
+        .command_processor_not_found => "CommandProcessorNotFound",
+        .powershell_not_found => "PowerShellNotFound",
+    };
+}
+
+fn retryableWindowsCodexBuildErrorValue(err: RetryableWindowsCodexBuildError) anyerror {
+    return switch (err) {
+        .command_processor_not_found => error.CommandProcessorNotFound,
+        .powershell_not_found => error.PowerShellNotFound,
+    };
+}
+
+fn shouldRetryWindowsCodexBuild(err: anyerror, kind: WindowsCodexPathKind) ?RetryableWindowsCodexBuildError {
+    return switch (err) {
+        error.CommandProcessorNotFound => switch (kind) {
+            .cmd => .command_processor_not_found,
+            else => null,
+        },
+        error.PowerShellNotFound => switch (kind) {
+            .ps1 => .powershell_not_found,
+            else => null,
+        },
+        else => null,
+    };
+}
+
+fn shouldRetryWindowsCodexLaunch(err: std.process.SpawnError, kind: WindowsCodexPathKind) bool {
+    return switch (err) {
+        error.FileNotFound => true,
+        error.AccessDenied => switch (kind) {
+            .cmd, .ps1 => true,
+            .exe => false,
+        },
         else => false,
     };
 }
@@ -422,9 +458,14 @@ pub fn runCodexLogin(opts: types.LoginOptions, codex_home: []const u8) !void {
             return error.FileNotFound;
         }
 
-        var last_retryable_error: ?std.process.SpawnError = null;
+        var last_retryable_spawn_error: ?std.process.SpawnError = null;
+        var last_retryable_build_error: ?RetryableWindowsCodexBuildError = null;
         for (candidates.items) |*candidate| {
             var launch = buildWindowsCodexLaunchAlloc(std.heap.page_allocator, candidate, opts) catch |err| {
+                if (shouldRetryWindowsCodexBuild(err, candidate.kind)) |retryable_err| {
+                    last_retryable_build_error = retryable_err;
+                    continue;
+                }
                 writeCodexLoginLaunchFailureHint(@errorName(err)) catch {};
                 return err;
             };
@@ -438,7 +479,7 @@ pub fn runCodexLogin(opts: types.LoginOptions, codex_home: []const u8) !void {
             }) catch |err| {
                 launch.deinit(std.heap.page_allocator);
                 if (shouldRetryWindowsCodexLaunch(err, candidate.kind)) {
-                    last_retryable_error = err;
+                    last_retryable_spawn_error = err;
                     continue;
                 }
                 writeCodexLoginLaunchFailureHint(@errorName(err)) catch {};
@@ -453,9 +494,14 @@ pub fn runCodexLogin(opts: types.LoginOptions, codex_home: []const u8) !void {
             return ensureCodexLoginSucceeded(term);
         }
 
-        const err = last_retryable_error orelse unreachable;
-        writeCodexLoginLaunchFailureHint(@errorName(err)) catch {};
-        return err;
+        if (last_retryable_spawn_error) |err| {
+            writeCodexLoginLaunchFailureHint(@errorName(err)) catch {};
+            return err;
+        }
+
+        const build_err = last_retryable_build_error orelse unreachable;
+        writeCodexLoginLaunchFailureHint(retryableWindowsCodexBuildErrorName(build_err)) catch {};
+        return retryableWindowsCodexBuildErrorValue(build_err);
     }
 
     var launch = buildCodexLaunchAlloc(std.heap.page_allocator, opts) catch |err| {

@@ -206,7 +206,10 @@ pub fn runCodexLogin(opts: types.LoginOptions, codex_home: []const u8) !void {
     defer env_map.deinit();
     try env_map.put("CODEX_HOME", codex_home);
 
-    var launch = try buildCodexLaunchAlloc(std.heap.page_allocator, opts);
+    var launch = buildCodexLaunchAlloc(std.heap.page_allocator, opts) catch |err| {
+        writeCodexLoginLaunchFailureHint(@errorName(err)) catch {};
+        return err;
+    };
     defer launch.deinit(std.heap.page_allocator);
 
     var child = std.process.spawn(app_runtime.io(), .{

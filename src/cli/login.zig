@@ -41,7 +41,6 @@ const CodexLaunch = struct {
 const WindowsCodexPathList = std.ArrayList(WindowsCodexPath);
 
 pub const RetryableWindowsCodexBuildError = enum {
-    command_processor_not_found,
     powershell_not_found,
 };
 
@@ -196,13 +195,6 @@ fn resolveOptionalExecutableAlloc(
     };
 }
 
-fn resolveWindowsCmdExecutableAlloc(allocator: std.mem.Allocator) ![]u8 {
-    return http_executable.ensureExecutableAvailableAlloc(allocator, "cmd.exe") catch |err| switch (err) {
-        error.ExecutableRequired => error.CommandProcessorNotFound,
-        else => err,
-    };
-}
-
 fn resolveWindowsPowerShellExecutableAlloc(allocator: std.mem.Allocator) ![]u8 {
     if (try resolveOptionalExecutableAlloc(allocator, "powershell.exe")) |path| return path;
     if (try resolveOptionalExecutableAlloc(allocator, "pwsh.exe")) |path| return path;
@@ -224,7 +216,7 @@ fn buildWindowsCodexLaunchAlloc(
     opts: types.LoginOptions,
 ) !CodexLaunch {
     switch (resolved.kind) {
-        .exe => {
+        .exe, .cmd => {
             var launch = CodexLaunch{};
             launch.argv_storage[0] = resolved.path;
             launch.argv_storage[1] = "login";
@@ -232,23 +224,6 @@ fn buildWindowsCodexLaunchAlloc(
             if (opts.device_auth) {
                 launch.argv_storage[2] = "--device-auth";
                 launch.argv_len = 3;
-            }
-            return launch;
-        },
-        .cmd => {
-            const cmd_exe = try resolveWindowsCmdExecutableAlloc(allocator);
-            errdefer allocator.free(cmd_exe);
-
-            var launch = CodexLaunch{ .owned_paths = .{cmd_exe} };
-            launch.argv_storage[0] = cmd_exe;
-            launch.argv_storage[1] = "/D";
-            launch.argv_storage[2] = "/C";
-            launch.argv_storage[3] = resolved.path;
-            launch.argv_storage[4] = "login";
-            launch.argv_len = 5;
-            if (opts.device_auth) {
-                launch.argv_storage[5] = "--device-auth";
-                launch.argv_len = 6;
             }
             return launch;
         },
@@ -293,24 +268,18 @@ fn writeCodexLoginLaunchFailureHint(err_name: []const u8) !void {
 
 fn retryableWindowsCodexBuildErrorName(err: RetryableWindowsCodexBuildError) []const u8 {
     return switch (err) {
-        .command_processor_not_found => "CommandProcessorNotFound",
         .powershell_not_found => "PowerShellNotFound",
     };
 }
 
 fn retryableWindowsCodexBuildErrorValue(err: RetryableWindowsCodexBuildError) anyerror {
     return switch (err) {
-        .command_processor_not_found => error.CommandProcessorNotFound,
         .powershell_not_found => error.PowerShellNotFound,
     };
 }
 
 fn shouldRetryWindowsCodexBuild(err: anyerror, kind: WindowsCodexPathKind) ?RetryableWindowsCodexBuildError {
     return switch (err) {
-        error.CommandProcessorNotFound => switch (kind) {
-            .cmd => .command_processor_not_found,
-            else => null,
-        },
         error.PowerShellNotFound => switch (kind) {
             .ps1 => .powershell_not_found,
             else => null,

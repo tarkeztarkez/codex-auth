@@ -236,7 +236,7 @@ fn writeBrokenBareWindowsCodex(dir: fs.Dir) !void {
     });
 }
 
-fn writeSuccessfulFakeCodexPowerShell(dir: fs.Dir) !void {
+fn writeSuccessfulFakeCodexPowerShellAt(dir: fs.Dir, sub_path: []const u8) !void {
     if (builtin.os.tag != .windows) return;
 
     const script =
@@ -249,13 +249,18 @@ fn writeSuccessfulFakeCodexPowerShell(dir: fs.Dir) !void {
         "if (-not (Test-Path -LiteralPath $codexHomeDir)) { New-Item -ItemType Directory -Path $codexHomeDir | Out-Null }\r\n" ++
         "Copy-Item -Force (Join-Path $homePath 'fake-auth.json') (Join-Path $codexHomeDir 'auth.json')\r\n";
 
-    try dir.writeFile(.{ .sub_path = fakeCodexPowerShellPath(), .data = script });
+    try dir.writeFile(.{ .sub_path = sub_path, .data = script });
 }
 
-fn writeSuccessfulFakeCodexExe(
+fn writeSuccessfulFakeCodexPowerShell(dir: fs.Dir) !void {
+    try writeSuccessfulFakeCodexPowerShellAt(dir, fakeCodexPowerShellPath());
+}
+
+fn writeSuccessfulFakeCodexExeAt(
     allocator: std.mem.Allocator,
     dir: fs.Dir,
     project_root: []const u8,
+    sub_path: []const u8,
 ) !void {
     if (builtin.os.tag != .windows) return;
 
@@ -263,7 +268,15 @@ fn writeSuccessfulFakeCodexExe(
     defer allocator.free(built_fake_codex);
     const fake_codex_data = try fixtures.readFileAlloc(allocator, built_fake_codex);
     defer allocator.free(fake_codex_data);
-    try dir.writeFile(.{ .sub_path = fakeCodexExePath(), .data = fake_codex_data });
+    try dir.writeFile(.{ .sub_path = sub_path, .data = fake_codex_data });
+}
+
+fn writeSuccessfulFakeCodexExe(
+    allocator: std.mem.Allocator,
+    dir: fs.Dir,
+    project_root: []const u8,
+) !void {
+    try writeSuccessfulFakeCodexExeAt(allocator, dir, project_root, fakeCodexExePath());
 }
 
 fn fakeCurlCommandPath() []const u8 {
@@ -1103,13 +1116,8 @@ test "Scenario: Given an earlier PowerShell launcher and a later exe launcher wh
     try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
     try tmp.dir.writeFile(.{ .sub_path = "ps1-bin/codex", .data = "#!/bin/sh\nexit 99\n" });
 
-    const ps1_dir = try tmp.dir.openDir("ps1-bin", .{});
-    defer ps1_dir.close();
-    try writeSuccessfulFakeCodexPowerShell(ps1_dir);
-
-    const exe_dir = try tmp.dir.openDir("exe-bin", .{});
-    defer exe_dir.close();
-    try writeSuccessfulFakeCodexExe(gpa, exe_dir, project_root);
+    try writeSuccessfulFakeCodexPowerShellAt(tmp.dir, "ps1-bin/codex.ps1");
+    try writeSuccessfulFakeCodexExeAt(gpa, tmp.dir, project_root, "exe-bin/codex.exe");
 
     const ps1_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "ps1-bin" });
     defer gpa.free(ps1_bin_path);

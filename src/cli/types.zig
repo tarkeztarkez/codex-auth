@@ -58,7 +58,24 @@ pub const CleanOptions = struct {
 pub const LiveOptions = struct {
     interval_seconds: u16,
 };
-pub const ConfigOptions = union(enum) { live: LiveOptions };
+pub const AutoThresholds = struct {
+    five_hour_percent: u8 = 2,
+    weekly_percent: u8 = 2,
+    interval_seconds: u16 = 60,
+};
+pub const AutoConfigAction = enum { enable, disable };
+pub const AutoConfigOptions = struct {
+    action: AutoConfigAction,
+    thresholds: AutoThresholds = .{},
+};
+pub const ConfigOptions = union(enum) {
+    live: LiveOptions,
+    auto: AutoConfigOptions,
+};
+pub const DaemonOptions = struct {
+    watch: bool,
+    thresholds: AutoThresholds = .{},
+};
 pub const AppAction = enum { launch };
 pub const AppPlatform = enum { win, wsl, mac };
 pub const AppOptions = struct {
@@ -80,6 +97,7 @@ pub const HelpTopic = enum {
     alias,
     clean,
     config,
+    daemon,
     app,
 };
 
@@ -93,6 +111,7 @@ pub const Command = union(enum) {
     alias: AliasOptions,
     clean: CleanOptions,
     config: ConfigOptions,
+    daemon: DaemonOptions,
     app: AppOptions,
     version: void,
     help: HelpTopic,

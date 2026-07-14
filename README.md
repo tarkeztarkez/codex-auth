@@ -92,6 +92,7 @@ Detailed command documentation lives in [docs/commands/README.md](./docs/command
 | Command | Description |
 |---------|-------------|
 | [`codex-auth config live --interval <seconds>`](./docs/commands/config.md) | Configure live TUI refresh interval |
+| [`codex-auth config auto enable\|disable`](./docs/commands/config.md) | Manage background account auto-switching |
 
 ## Quick Examples
 
@@ -103,7 +104,13 @@ codex-auth switch 02
 codex-auth remove work
 codex-auth import /path/to/auth.json --alias personal
 codex-auth list --skip-api
+codex-auth config auto enable
 ```
+
+Background auto-switching refreshes all account limits every 60 seconds and
+switches away from the active account when either its 5-hour or weekly
+remaining allowance reaches 2% by default. Configure thresholds with
+`codex-auth config auto enable --5h <percent> --weekly <percent>`.
 
 ## Codex App
 

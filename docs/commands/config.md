@@ -3,8 +3,23 @@
 ## Usage
 
 ```shell
+codex-auth config auto enable [--5h <percent>] [--weekly <percent>] [--interval <seconds>]
+codex-auth config auto disable
 codex-auth config live --interval <seconds>
 ```
+
+## Background Auto Switch
+
+`config auto enable` installs, enables, and starts the per-user background
+watcher. The default thresholds are 2% remaining for both the 5-hour and
+weekly windows, with a 60-second refresh interval. A candidate is selected
+only after a successful current API refresh and only when it remains above
+both configured thresholds.
+
+On Linux the watcher is installed as
+`codex-auth-autoswitch.service` under `systemd --user`.
+
+`config auto disable` stops and removes the watcher.
 
 ## Live Refresh Config
 

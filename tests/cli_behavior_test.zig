@@ -77,6 +77,47 @@ fn expectArgv(actual: []const []const u8, expected: []const []const u8) !void {
     }
 }
 
+test "config auto enable defaults both thresholds to two percent" {
+    const allocator = std.testing.allocator;
+    const args = [_][:0]const u8{ "codex-auth", "config", "auto", "enable" };
+    var result = try cli.commands.parseArgs(allocator, &args);
+    defer cli.commands.freeParseResult(allocator, &result);
+    switch (result) {
+        .command => |command| switch (command) {
+            .config => |config| switch (config) {
+                .auto => |opts| {
+                    try std.testing.expectEqual(cli.types.AutoConfigAction.enable, opts.action);
+                    try std.testing.expectEqual(@as(u8, 2), opts.thresholds.five_hour_percent);
+                    try std.testing.expectEqual(@as(u8, 2), opts.thresholds.weekly_percent);
+                    try std.testing.expectEqual(@as(u16, 60), opts.thresholds.interval_seconds);
+                },
+                else => return error.TestExpectedEqual,
+            },
+            else => return error.TestExpectedEqual,
+        },
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "daemon watch parser preserves configured thresholds" {
+    const allocator = std.testing.allocator;
+    const args = [_][:0]const u8{ "codex-auth", "daemon", "--watch", "--5h", "3", "--weekly", "4", "--interval", "30" };
+    var result = try cli.commands.parseArgs(allocator, &args);
+    defer cli.commands.freeParseResult(allocator, &result);
+    switch (result) {
+        .command => |command| switch (command) {
+            .daemon => |opts| {
+                try std.testing.expect(opts.watch);
+                try std.testing.expectEqual(@as(u8, 3), opts.thresholds.five_hour_percent);
+                try std.testing.expectEqual(@as(u8, 4), opts.thresholds.weekly_percent);
+                try std.testing.expectEqual(@as(u16, 30), opts.thresholds.interval_seconds);
+            },
+            else => return error.TestExpectedEqual,
+        },
+        else => return error.TestExpectedEqual,
+    }
+}
+
 test "Scenario: Given app launch overrides when parsing then IDs and paths are preserved" {
     const gpa = std.testing.allocator;
     const args = [_][:0]const u8{
@@ -413,7 +454,8 @@ test "Scenario: Given help when rendering then login and command help notes are 
     try std.testing.expect(std.mem.indexOf(u8, help, "switch [--live] [--api|--skip-api]") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "alias set <alias|email|display-number|query> <alias>") != null);
     try std.testing.expect(std.mem.indexOf(u8, help, "config live --interval <seconds>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, help, "auto enable") == null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "config auto enable") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "daemon --watch|--once") != null);
 }
 
 test "Scenario: Given simple command help when rendering then examples are omitted" {
@@ -507,7 +549,7 @@ test "Scenario: Given alias command help when rendering then set and clear examp
     try std.testing.expect(std.mem.indexOf(u8, help, "New aliases cannot be empty or only digits.") != null);
 }
 
-test "Scenario: Given config help when rendering then live mode is explained" {
+test "Scenario: Given config help when rendering then live and auto modes are explained" {
     const gpa = std.testing.allocator;
     var config_aw: std.Io.Writer.Allocating = .init(gpa);
     defer config_aw.deinit();
@@ -518,7 +560,8 @@ test "Scenario: Given config help when rendering then live mode is explained" {
     try std.testing.expect(std.mem.indexOf(u8, config_help, "codex-auth config live --interval <seconds>") != null);
     try std.testing.expect(std.mem.indexOf(u8, config_help, "live --interval <seconds>\n                    Set the live TUI refresh interval from 5 to 3600 seconds.") != null);
     try std.testing.expect(std.mem.indexOf(u8, config_help, "codex-auth config live --interval 60") != null);
-    try std.testing.expect(std.mem.indexOf(u8, config_help, "auto") == null);
+    try std.testing.expect(std.mem.indexOf(u8, config_help, "codex-auth config auto enable") != null);
+    try std.testing.expect(std.mem.indexOf(u8, config_help, "both default to 2") != null);
 }
 
 test "Scenario: Given scanned import report when rendering then stdout and stderr match the import format" {
@@ -662,6 +705,7 @@ test "Scenario: Given config live interval when parsing then interval is preserv
         .command => |cmd| switch (cmd) {
             .config => |opts| switch (opts) {
                 .live => |live_opts| try std.testing.expectEqual(@as(u16, 30), live_opts.interval_seconds),
+                else => return error.TestExpectedEqual,
             },
             else => return error.TestExpectedEqual,
         },

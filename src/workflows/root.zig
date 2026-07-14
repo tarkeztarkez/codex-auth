@@ -27,6 +27,7 @@ const alias_workflow = @import("alias.zig");
 const workflow_env = @import("env.zig");
 const targets = @import("targets.zig");
 const usage_refresh = @import("usage.zig");
+const auto_switch = @import("../auto/root.zig");
 
 pub const nowMilliseconds = workflow_env.nowMilliseconds;
 pub const nowSeconds = workflow_env.nowSeconds;
@@ -141,6 +142,7 @@ fn runMain(init: std.process.Init.Minimal) !void {
             else => try cli.help.printCommandHelp(topic),
         },
         .config => |opts| try config_workflow.handleConfig(allocator, codex_home.?, opts),
+        .daemon => |opts| try auto_switch.runDaemon(allocator, codex_home.?, opts),
         .app => |opts| try app_workflow.handleApp(allocator, codex_home.?, opts),
         .list => |opts| try list_workflow.handleList(allocator, codex_home.?, opts),
         .login => |opts| try login_workflow.handleLogin(allocator, codex_home.?, opts),

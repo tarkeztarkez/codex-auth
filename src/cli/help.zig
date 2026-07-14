@@ -59,6 +59,9 @@ pub fn writeHelp(
     try writeCommandDetail(out, use_color, "clean background");
     try writeCommandSummary(out, use_color, "config", "Manage configuration");
     try writeCommandDetail(out, use_color, "config live --interval <seconds>");
+    try writeCommandDetail(out, use_color, "config auto enable [--5h <percent>] [--weekly <percent>] [--interval <seconds>]");
+    try writeCommandDetail(out, use_color, "config auto disable");
+    try writeCommandSummary(out, use_color, "daemon --watch|--once", "Run the background auto-switch worker");
     try writeCommandSummary(out, use_color, "app", "Launch Codex App with CLI overrides");
 
     try out.writeAll("\n");
@@ -134,6 +137,7 @@ fn commandNameForTopic(topic: HelpTopic) []const u8 {
         .alias => "alias",
         .clean => "clean",
         .config => "config",
+        .daemon => "daemon",
         .app => "app",
     };
 }
@@ -149,21 +153,22 @@ fn commandDescriptionForTopic(topic: HelpTopic) []const u8 {
         .remove_account => "Remove one or more accounts by alias, email, display number, or partial query.",
         .alias => "Set or clear an account alias by alias, email, display number, or partial query.",
         .clean => "Delete backup and stale files under accounts/.",
-        .config => "Manage live refresh configuration.",
+        .config => "Manage live refresh and background auto-switch configuration.",
+        .daemon => "Run one auto-switch cycle or the persistent background watcher.",
         .app => "Launch Codex App with CLI overrides.",
     };
 }
 
 fn commandHelpHasExamples(topic: HelpTopic) bool {
     return switch (topic) {
-        .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .app => true,
+        .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .daemon, .app => true,
         else => false,
     };
 }
 
 fn commandHelpHasOptions(topic: HelpTopic) bool {
     return switch (topic) {
-        .list, .login, .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .app => true,
+        .list, .login, .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .daemon, .app => true,
         else => false,
     };
 }
@@ -227,6 +232,12 @@ fn writeUsageLines(out: *std.Io.Writer, topic: HelpTopic) !void {
         },
         .config => {
             try out.writeAll("  codex-auth config live --interval <seconds>\n");
+            try out.writeAll("  codex-auth config auto enable [--5h <percent>] [--weekly <percent>] [--interval <seconds>]\n");
+            try out.writeAll("  codex-auth config auto disable\n");
+        },
+        .daemon => {
+            try out.writeAll("  codex-auth daemon --watch [--5h <percent>] [--weekly <percent>] [--interval <seconds>]\n");
+            try out.writeAll("  codex-auth daemon --once [--5h <percent>] [--weekly <percent>]\n");
         },
         .app => {
             try out.writeAll("  codex-auth app [--id <id>] [--codex-cli-path <path>] [--codex-home <path>] [--platform win|wsl|mac]\n");
@@ -246,6 +257,7 @@ pub fn helpCommandForTopic(topic: HelpTopic) []const u8 {
         .alias => "codex-auth alias --help",
         .clean => "codex-auth clean --help",
         .config => "codex-auth config --help",
+        .daemon => "codex-auth daemon --help",
         .app => "codex-auth app --help",
     };
 }
@@ -302,6 +314,17 @@ fn writeOptionLines(out: *std.Io.Writer, topic: HelpTopic) !void {
         .config => {
             try out.writeAll("  live --interval <seconds>\n");
             try out.writeAll("                    Set the live TUI refresh interval from 5 to 3600 seconds.\n");
+            try out.writeAll("  auto enable       Install, enable, and start the background watcher.\n");
+            try out.writeAll("  auto disable      Stop and remove the background watcher.\n");
+            try out.writeAll("  --5h, --weekly    Remaining-percent thresholds; both default to 2.\n");
+            try out.writeAll("  --interval        Watch interval in seconds; defaults to 60.\n");
+        },
+        .daemon => {
+            try out.writeAll("  --watch            Run continuously.\n");
+            try out.writeAll("  --once             Run one refresh and switch cycle.\n");
+            try out.writeAll("  --5h <percent>     Switch at or below this 5-hour remainder (default 2).\n");
+            try out.writeAll("  --weekly <percent> Switch at or below this weekly remainder (default 2).\n");
+            try out.writeAll("  --interval <secs>  Watch interval from 5 to 3600 seconds (default 60).\n");
         },
         .app => {
             try out.writeAll("  --id <id>          Windows package/AUMID or macOS bundle identifier.\n");
@@ -384,6 +407,13 @@ fn writeExampleLines(out: *std.Io.Writer, topic: HelpTopic) !void {
         },
         .config => {
             try out.writeAll("  codex-auth config live --interval 60\n");
+            try out.writeAll("  codex-auth config auto enable\n");
+            try out.writeAll("  codex-auth config auto enable --5h 2 --weekly 2\n");
+            try out.writeAll("  codex-auth config auto disable\n");
+        },
+        .daemon => {
+            try out.writeAll("  codex-auth daemon --once\n");
+            try out.writeAll("  codex-auth daemon --watch --5h 2 --weekly 2\n");
         },
         .app => {
             try out.writeAll("  codex-auth app\n");

@@ -91,3 +91,14 @@ test "unrefreshed candidates are never selected" {
 
     try std.testing.expectEqual(@as(?usize, null), auto.selectCandidateIndex(&reg, &outcomes, .{}, 100));
 }
+
+test "only 401 token_expired outcomes request Codex reauthentication" {
+    const body =
+        \\{"error":{"code":"token_expired","message":"expired"}}
+    ;
+    const code = codex_auth.api.usage.parseNonSuccessErrorCode(std.testing.allocator, 401, body) orelse
+        return error.TestExpectedEqual;
+    try std.testing.expect(auto.isTokenExpired(.{ .attempted = true, .status_code = 401, .error_code = code }));
+    try std.testing.expect(!auto.isTokenExpired(.{ .attempted = true, .status_code = 403, .error_code = code }));
+    try std.testing.expect(!auto.isTokenExpired(.{ .attempted = true, .status_code = 401 }));
+}

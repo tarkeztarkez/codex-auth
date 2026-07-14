@@ -112,6 +112,12 @@ switches away from the active account when either its 5-hour or weekly
 remaining allowance reaches 2% by default. Configure thresholds with
 `codex-auth config auto enable --5h <percent> --weekly <percent>`.
 
+When a stored account returns `401 token_expired`, the watcher runs
+`codex doctor --json` against that account in an isolated temporary
+`CODEX_HOME`. It waits for Codex to exit, validates the refreshed token against
+the usage API and verifies account identity before replacing the stored auth.
+Failed reauthentication attempts are rate-limited to once every 15 minutes.
+
 ## Codex App
 
 > [!IMPORTANT]

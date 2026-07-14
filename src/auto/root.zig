@@ -3,6 +3,10 @@ const app_runtime = @import("../core/runtime.zig");
 const registry = @import("../registry/root.zig");
 const usage_refresh = @import("../workflows/usage.zig");
 const types = @import("../cli/types.zig");
+const reauth = @import("reauth.zig");
+
+pub const isTokenExpired = reauth.isTokenExpired;
+const reauth_retry_cooldown_seconds: i64 = 15 * 60;
 
 pub const CycleResult = enum {
     no_accounts,
@@ -11,6 +15,11 @@ pub const CycleResult = enum {
     above_threshold,
     no_candidate,
     switched,
+};
+
+const CycleOutcome = struct {
+    result: CycleResult,
+    reauth_attempted: bool = false,
 };
 
 fn remainingPercent(window: ?registry.RateLimitWindow, now: i64) ?f64 {
@@ -79,29 +88,56 @@ pub fn runCycle(
     codex_home: []const u8,
     thresholds: types.AutoThresholds,
 ) !CycleResult {
+    return (try runCycleWithReauth(allocator, codex_home, thresholds, true)).result;
+}
+
+fn runCycleWithReauth(
+    allocator: std.mem.Allocator,
+    codex_home: []const u8,
+    thresholds: types.AutoThresholds,
+    allow_reauth: bool,
+) !CycleOutcome {
     var reg = try registry.loadRegistry(allocator, codex_home);
     defer reg.deinit(allocator);
-    if (reg.accounts.items.len == 0) return .no_accounts;
+    if (reg.accounts.items.len == 0) return .{ .result = .no_accounts };
 
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
     }
-    const active_key = reg.active_account_key orelse return .no_active_account;
-    const active_idx = registry.findAccountIndexByAccountKey(&reg, active_key) orelse return .no_active_account;
+    const active_key = reg.active_account_key orelse return .{ .result = .no_active_account };
+    const active_idx = registry.findAccountIndexByAccountKey(&reg, active_key) orelse return .{ .result = .no_active_account };
 
     var refresh = try usage_refresh.refreshForegroundUsageForDisplay(allocator, codex_home, &reg);
     defer refresh.deinit(allocator);
-    if (active_idx >= refresh.outcomes.len or !refresh.outcomes[active_idx].has_usage_windows) return .refresh_failed;
+    var reauth_attempted = false;
+    if (allow_reauth) {
+        for (refresh.outcomes) |outcome| {
+            if (reauth.isTokenExpired(outcome)) {
+                reauth_attempted = true;
+                break;
+            }
+        }
+        if (reauth_attempted) {
+            const repaired = try reauth.repairExpiredAccounts(allocator, codex_home, &reg, refresh.outcomes);
+            if (repaired > 0) {
+                refresh.deinit(allocator);
+                refresh = try usage_refresh.refreshForegroundUsageForDisplay(allocator, codex_home, &reg);
+            }
+        }
+    }
+    if (active_idx >= refresh.outcomes.len or !refresh.outcomes[active_idx].has_usage_windows) {
+        return .{ .result = .refresh_failed, .reauth_attempted = reauth_attempted };
+    }
 
     const now = std.Io.Timestamp.now(app_runtime.io(), .real).toSeconds();
-    if (!accountIsAtOrBelowThreshold(&reg.accounts.items[active_idx], thresholds, now)) return .above_threshold;
+    if (!accountIsAtOrBelowThreshold(&reg.accounts.items[active_idx], thresholds, now)) return .{ .result = .above_threshold, .reauth_attempted = reauth_attempted };
 
-    const candidate_idx = selectCandidateIndex(&reg, refresh.outcomes, thresholds, now) orelse return .no_candidate;
+    const candidate_idx = selectCandidateIndex(&reg, refresh.outcomes, thresholds, now) orelse return .{ .result = .no_candidate, .reauth_attempted = reauth_attempted };
     const candidate_key = try allocator.dupe(u8, reg.accounts.items[candidate_idx].account_key);
     defer allocator.free(candidate_key);
     try registry.activateAccountByKey(allocator, codex_home, &reg, candidate_key);
     try registry.saveRegistry(allocator, codex_home, &reg);
-    return .switched;
+    return .{ .result = .switched, .reauth_attempted = reauth_attempted };
 }
 
 pub fn runDaemon(
@@ -110,8 +146,8 @@ pub fn runDaemon(
     opts: types.DaemonOptions,
 ) !void {
     if (!opts.watch) {
-        const result = try runCycle(allocator, codex_home, opts.thresholds);
-        std.log.info("auto-switch cycle: {s}", .{@tagName(result)});
+        const outcome = try runCycleWithReauth(allocator, codex_home, opts.thresholds, true);
+        std.log.info("auto-switch cycle: {s}", .{@tagName(outcome.result)});
         return;
     }
 
@@ -119,15 +155,18 @@ pub fn runDaemon(
         "auto-switch watcher started (5h <= {d}%, weekly <= {d}%, interval {d}s)",
         .{ opts.thresholds.five_hour_percent, opts.thresholds.weekly_percent, opts.thresholds.interval_seconds },
     );
+    var next_reauth_at: i64 = 0;
     while (true) {
-        const result = runCycle(allocator, codex_home, opts.thresholds) catch |err| {
+        const now = std.Io.Timestamp.now(app_runtime.io(), .real).toSeconds();
+        const outcome = runCycleWithReauth(allocator, codex_home, opts.thresholds, now >= next_reauth_at) catch |err| {
             std.log.err("auto-switch cycle failed: {s}", .{@errorName(err)});
             std.Io.sleep(app_runtime.io(), .fromSeconds(opts.thresholds.interval_seconds), .awake) catch {};
             continue;
         };
-        if (result == .switched) {
+        if (outcome.reauth_attempted) next_reauth_at = now + reauth_retry_cooldown_seconds;
+        if (outcome.result == .switched) {
             std.log.info("auto-switch completed", .{});
-        } else if (result == .refresh_failed) {
+        } else if (outcome.result == .refresh_failed) {
             std.log.warn("auto-switch skipped because active-account usage refresh failed", .{});
         }
         std.Io.sleep(app_runtime.io(), .fromSeconds(opts.thresholds.interval_seconds), .awake) catch {};

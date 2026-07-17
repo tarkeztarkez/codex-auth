@@ -12,7 +12,7 @@ docker run --rm -p 8080:8080 \
   codex-auth-server
 ```
 
-`API_TOKEN` is required and must contain at least 16 characters. `DATABASE_URL` must point to a PostgreSQL database; the server creates its `credentials` table at startup. `PORT` defaults to `8080`. TLS should be terminated by the deployment platform or a reverse proxy.
+`API_TOKEN` is required and must contain at least 16 characters. `DATABASE_URL` must point to an administrative database on the PostgreSQL instance. At startup, the server creates the database named by `DATABASE_NAME` (default `codex_auth`) when needed, then creates its `credentials` table. `PORT` defaults to `8080`. TLS should be terminated by the deployment platform or a reverse proxy.
 
 The authenticated API is:
 

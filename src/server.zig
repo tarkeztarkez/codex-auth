@@ -59,6 +59,35 @@ fn ensureSchema(allocator: std.mem.Allocator, database_url: []const u8) !void {
     allocator.free(output);
 }
 
+fn validateDatabaseName(name: []const u8) !void {
+    if (name.len == 0 or name.len > 63) return error.InvalidDatabaseName;
+    for (name) |ch| switch (ch) {
+        'a'...'z', 'A'...'Z', '0'...'9', '_' => {},
+        else => return error.InvalidDatabaseName,
+    };
+}
+
+fn databaseUrlAlloc(allocator: std.mem.Allocator, admin_url: []const u8, database_name: []const u8) ![]u8 {
+    const query_start = std.mem.indexOfScalar(u8, admin_url, '?') orelse admin_url.len;
+    const path_end = std.mem.lastIndexOfScalar(u8, admin_url[0..query_start], '/') orelse return error.InvalidDatabaseUrl;
+    if (path_end < (std.mem.indexOf(u8, admin_url, "://") orelse return error.InvalidDatabaseUrl) + 3)
+        return error.InvalidDatabaseUrl;
+    return std.mem.concat(allocator, u8, &.{ admin_url[0 .. path_end + 1], database_name, admin_url[query_start..] });
+}
+
+fn ensureDatabase(allocator: std.mem.Allocator, admin_url: []const u8, database_name: []const u8) !void {
+    try validateDatabaseName(database_name);
+    const check_query = try std.fmt.allocPrint(allocator, "SELECT 1 FROM pg_database WHERE datname = '{s}'", .{database_name});
+    defer allocator.free(check_query);
+    const existing = try psql(allocator, admin_url, check_query, 1024 * 1024);
+    defer allocator.free(existing);
+    if (std.mem.eql(u8, std.mem.trim(u8, existing, " \r\n\t"), "1")) return;
+    const create_query = try std.fmt.allocPrint(allocator, "CREATE DATABASE {s}", .{database_name});
+    defer allocator.free(create_query);
+    const output = try psql(allocator, admin_url, create_query, 1024 * 1024);
+    allocator.free(output);
+}
+
 fn hexAlloc(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
     const alphabet = "0123456789abcdef";
     const encoded = try allocator.alloc(u8, bytes.len * 2);
@@ -157,7 +186,12 @@ pub fn run(allocator: std.mem.Allocator, port_override: ?u16) !void {
     const api_token = (try envOwned(allocator, "API_TOKEN")) orelse return error.ApiTokenRequired;
     defer allocator.free(api_token);
     if (api_token.len < 16) return error.ApiTokenTooShort;
-    const database_url = (try envOwned(allocator, "DATABASE_URL")) orelse return error.DatabaseUrlRequired;
+    const admin_database_url = (try envOwned(allocator, "DATABASE_URL")) orelse return error.DatabaseUrlRequired;
+    defer allocator.free(admin_database_url);
+    const database_name = (try envOwned(allocator, "DATABASE_NAME")) orelse try allocator.dupe(u8, "codex_auth");
+    defer allocator.free(database_name);
+    try ensureDatabase(allocator, admin_database_url, database_name);
+    const database_url = try databaseUrlAlloc(allocator, admin_database_url, database_name);
     defer allocator.free(database_url);
     try ensureSchema(allocator, database_url);
     const port = port_override orelse blk: {

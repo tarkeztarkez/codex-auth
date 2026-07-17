@@ -93,6 +93,7 @@ Detailed command documentation lives in [docs/commands/README.md](./docs/command
 |---------|-------------|
 | [`codex-auth config live --interval <seconds>`](./docs/commands/config.md) | Configure live TUI refresh interval |
 | [`codex-auth config auto enable\|disable`](./docs/commands/config.md) | Manage background account auto-switching |
+| [`codex-auth config server set\|disable`](./docs/server.md) | Share credentials through a self-hosted server |
 
 ## Quick Examples
 

@@ -71,11 +71,17 @@ pub const AutoConfigOptions = struct {
 pub const ConfigOptions = union(enum) {
     live: LiveOptions,
     auto: AutoConfigOptions,
+    server: ServerConfigOptions,
+};
+pub const ServerConfigOptions = union(enum) {
+    set: struct { url: []u8, api_token: []u8 },
+    disable: void,
 };
 pub const DaemonOptions = struct {
     watch: bool,
     thresholds: AutoThresholds = .{},
 };
+pub const ServerOptions = struct { port: ?u16 = null };
 pub const AppAction = enum { launch };
 pub const AppPlatform = enum { win, wsl, mac };
 pub const AppOptions = struct {
@@ -98,6 +104,7 @@ pub const HelpTopic = enum {
     clean,
     config,
     daemon,
+    server,
     app,
 };
 
@@ -112,6 +119,7 @@ pub const Command = union(enum) {
     clean: CleanOptions,
     config: ConfigOptions,
     daemon: DaemonOptions,
+    server: ServerOptions,
     app: AppOptions,
     version: void,
     help: HelpTopic,

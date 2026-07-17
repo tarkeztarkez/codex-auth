@@ -4,6 +4,7 @@ const registry = @import("../registry/root.zig");
 const usage_refresh = @import("../workflows/usage.zig");
 const types = @import("../cli/types.zig");
 const reauth = @import("reauth.zig");
+const sync_client = @import("../sync/client.zig");
 
 pub const isTokenExpired = reauth.isTokenExpired;
 const reauth_retry_cooldown_seconds: i64 = 15 * 60;
@@ -99,10 +100,14 @@ fn runCycleWithReauth(
 ) !CycleOutcome {
     var reg = try registry.loadRegistry(allocator, codex_home);
     defer reg.deinit(allocator);
+    _ = sync_client.syncAll(allocator, codex_home, &reg) catch |err|
+        std.log.warn("credential server sync failed: {s}", .{@errorName(err)});
     if (reg.accounts.items.len == 0) return .{ .result = .no_accounts };
 
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
+        _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
+            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
     }
     const active_key = reg.active_account_key orelse return .{ .result = .no_active_account };
     const active_idx = registry.findAccountIndexByAccountKey(&reg, active_key) orelse return .{ .result = .no_active_account };

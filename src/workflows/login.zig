@@ -5,6 +5,7 @@ const auth = @import("../auth/auth.zig");
 const me_api = @import("../api/me.zig");
 const account_names = @import("account_names.zig");
 const app_runtime = @import("../core/runtime.zig");
+const sync_client = @import("../sync/client.zig");
 
 const defaultAccountFetcher = account_names.defaultAccountFetcher;
 const refreshAccountNamesAfterLogin = account_names.refreshAccountNamesAfterLogin;
@@ -57,6 +58,10 @@ pub fn handleLogin(allocator: std.mem.Allocator, codex_home: []const u8, opts: c
         try registry.upsertAccount(allocator, &reg, record);
         try registry.setActiveAccountKey(allocator, &reg, record_key);
         try registry.saveRegistry(allocator, codex_home, &reg);
+        _ = sync_client.pushAccount(allocator, codex_home, record_key) catch |err| {
+            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
+            return;
+        };
         return;
     }
 
@@ -74,4 +79,6 @@ pub fn handleLogin(allocator: std.mem.Allocator, codex_home: []const u8, opts: c
     try registry.setActiveAccountKey(allocator, &reg, record_key);
     _ = try refreshAccountNamesAfterLogin(allocator, &reg, &info, defaultAccountFetcher);
     try registry.saveRegistry(allocator, codex_home, &reg);
+    _ = sync_client.pushAccount(allocator, codex_home, record_key) catch |err|
+        std.log.warn("credential upload failed: {s}", .{@errorName(err)});
 }

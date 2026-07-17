@@ -15,7 +15,27 @@ pub fn parse(allocator: std.mem.Allocator, args: []const [:0]const u8) !types.Pa
     if (std.mem.eql(u8, scope, "auto")) {
         return parseAuto(allocator, args[1..]);
     }
+    if (std.mem.eql(u8, scope, "server")) return parseServer(allocator, args[1..]);
     return common.usageErrorResult(allocator, .config, "unknown config section `{s}`.", .{scope});
+}
+
+fn parseServer(allocator: std.mem.Allocator, args: []const [:0]const u8) !types.ParseResult {
+    if (args.len == 1 and std.mem.eql(u8, std.mem.sliceTo(args[0], 0), "disable"))
+        return .{ .command = .{ .config = .{ .server = .{ .disable = {} } } } };
+    if (args.len != 5 or !std.mem.eql(u8, std.mem.sliceTo(args[0], 0), "set"))
+        return common.usageErrorResult(allocator, .config, "use `config server set --url <url> --api-token <token>` or `config server disable`.", .{});
+    var url: ?[]u8 = null;
+    var token: ?[]u8 = null;
+    errdefer if (url) |value| allocator.free(value);
+    errdefer if (token) |value| allocator.free(value);
+    var i: usize = 1;
+    while (i < args.len) : (i += 2) {
+        const flag = std.mem.sliceTo(args[i], 0);
+        const value = std.mem.sliceTo(args[i + 1], 0);
+        if (std.mem.eql(u8, flag, "--url") and url == null) url = try allocator.dupe(u8, value) else if (std.mem.eql(u8, flag, "--api-token") and token == null) token = try allocator.dupe(u8, value) else return common.usageErrorResult(allocator, .config, "unknown or duplicate server option `{s}`.", .{flag});
+    }
+    if (url == null or token == null) return common.usageErrorResult(allocator, .config, "both `--url` and `--api-token` are required.", .{});
+    return .{ .command = .{ .config = .{ .server = .{ .set = .{ .url = url.?, .api_token = token.? } } } } };
 }
 
 fn parseAuto(allocator: std.mem.Allocator, args: []const [:0]const u8) !types.ParseResult {

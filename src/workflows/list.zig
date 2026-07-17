@@ -1,4 +1,5 @@
 const std = @import("std");
+const sync_client = @import("../sync/client.zig");
 const cli = @import("../cli/root.zig");
 const format = @import("../tui/table.zig");
 const registry = @import("../registry/root.zig");
@@ -66,6 +67,8 @@ pub fn handleList(allocator: std.mem.Allocator, codex_home: []const u8, opts: cl
     defer reg.deinit(allocator);
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
+        _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
+            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
     }
 
     const usage_api_enabled = apiModeUsesApi(reg.api.usage, opts.api_mode);

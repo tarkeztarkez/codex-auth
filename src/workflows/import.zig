@@ -2,6 +2,7 @@ const std = @import("std");
 const cli = @import("../cli/root.zig");
 const registry = @import("../registry/root.zig");
 const account_names = @import("account_names.zig");
+const sync_client = @import("../sync/client.zig");
 
 const loadSingleFileImportAuthInfo = account_names.loadSingleFileImportAuthInfo;
 const refreshAccountNamesAfterImport = account_names.refreshAccountNamesAfterImport;
@@ -11,6 +12,12 @@ pub fn handleImport(allocator: std.mem.Allocator, codex_home: []const u8, opts: 
     if (opts.purge) {
         var report = try registry.purgeRegistryFromImportSource(allocator, codex_home, opts.auth_path, opts.alias);
         defer report.deinit(allocator);
+        if (report.failure == null) {
+            var reg = try registry.loadRegistry(allocator, codex_home);
+            defer reg.deinit(allocator);
+            _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
+                std.log.warn("credential upload failed: {s}", .{@errorName(err)});
+        }
         try cli.output.printImportReport(&report);
         if (report.failure != null) return error.ImportFailed;
         return;
@@ -37,6 +44,8 @@ pub fn handleImport(allocator: std.mem.Allocator, codex_home: []const u8, opts: 
             );
         }
         try registry.saveRegistry(allocator, codex_home, &reg);
+        _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
+            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
     }
     try cli.output.printImportReport(&report);
     if (report.failure != null) return error.ImportFailed;

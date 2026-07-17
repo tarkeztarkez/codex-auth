@@ -12,6 +12,7 @@ const import_auth = @import("import.zig");
 const list = @import("list.zig");
 const login = @import("login.zig");
 const remove = @import("remove.zig");
+const server = @import("server.zig");
 const switch_account = @import("switch.zig");
 
 pub fn parseArgs(allocator: std.mem.Allocator, args: []const [:0]const u8) !types.ParseResult {
@@ -59,6 +60,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const [:0]const u8) !type
     if (std.mem.eql(u8, cmd, "clean")) return clean.parse(allocator, args[2..]);
     if (std.mem.eql(u8, cmd, "config")) return config.parse(allocator, args[2..]);
     if (std.mem.eql(u8, cmd, "daemon")) return daemon.parse(allocator, args[2..]);
+    if (std.mem.eql(u8, cmd, "server")) return server.parse(allocator, args[2..]);
     if (std.mem.eql(u8, cmd, "app")) return app.parse(allocator, args[2..]);
 
     return common.usageErrorResult(allocator, .top_level, "unknown command `{s}`.", .{cmd});
@@ -93,6 +95,16 @@ fn freeCommand(allocator: std.mem.Allocator, cmd: *types.Command) void {
             },
             .clear => |clear_opts| allocator.free(clear_opts.selector),
         },
+        .config => |opts| switch (opts) {
+            .server => |server_opts| switch (server_opts) {
+                .set => |set_opts| {
+                    allocator.free(set_opts.url);
+                    allocator.free(set_opts.api_token);
+                },
+                .disable => {},
+            },
+            else => {},
+        },
         else => {},
     }
     cmd.* = undefined;
@@ -122,6 +134,7 @@ fn helpTopicForName(name: []const u8) ?types.HelpTopic {
     if (std.mem.eql(u8, name, "clean")) return .clean;
     if (std.mem.eql(u8, name, "config")) return .config;
     if (std.mem.eql(u8, name, "daemon")) return .daemon;
+    if (std.mem.eql(u8, name, "server")) return .server;
     if (std.mem.eql(u8, name, "app")) return .app;
     return null;
 }

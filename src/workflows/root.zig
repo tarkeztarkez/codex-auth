@@ -28,6 +28,7 @@ const workflow_env = @import("env.zig");
 const targets = @import("targets.zig");
 const usage_refresh = @import("usage.zig");
 const auto_switch = @import("../auto/root.zig");
+const server_mode = @import("../server.zig");
 
 pub const nowMilliseconds = workflow_env.nowMilliseconds;
 pub const nowSeconds = workflow_env.nowSeconds;
@@ -130,6 +131,7 @@ fn runMain(init: std.process.Init.Minimal) !void {
     const needs_codex_home = switch (cmd) {
         .version => false,
         .help => false,
+        .server => false,
         else => true,
     };
     const codex_home = if (needs_codex_home) try registry.resolveCodexHome(allocator) else null;
@@ -143,6 +145,7 @@ fn runMain(init: std.process.Init.Minimal) !void {
         },
         .config => |opts| try config_workflow.handleConfig(allocator, codex_home.?, opts),
         .daemon => |opts| try auto_switch.runDaemon(allocator, codex_home.?, opts),
+        .server => |opts| try server_mode.run(allocator, opts.port),
         .app => |opts| try app_workflow.handleApp(allocator, codex_home.?, opts),
         .list => |opts| try list_workflow.handleList(allocator, codex_home.?, opts),
         .login => |opts| try login_workflow.handleLogin(allocator, codex_home.?, opts),

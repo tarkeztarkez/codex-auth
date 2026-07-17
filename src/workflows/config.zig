@@ -3,12 +3,31 @@ const cli = @import("../cli/root.zig");
 const io_util = @import("../core/io_util.zig");
 const registry = @import("../registry/root.zig");
 const auto_service = @import("../auto/service.zig");
+const sync_config = @import("../sync/config.zig");
 
 pub fn handleConfig(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.types.ConfigOptions) !void {
     switch (opts) {
         .live => |live_opts| try handleLiveCommand(allocator, codex_home, live_opts),
         .auto => |auto_opts| try handleAutoCommand(allocator, codex_home, auto_opts),
+        .server => |server_opts| try handleServerCommand(allocator, codex_home, server_opts),
     }
+}
+
+fn handleServerCommand(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.types.ServerConfigOptions) !void {
+    var stdout: io_util.Stdout = undefined;
+    stdout.init();
+    const out = stdout.out();
+    switch (opts) {
+        .set => |values| {
+            try sync_config.save(allocator, codex_home, values.url, values.api_token);
+            try out.print("Credential server configured: {s}\n", .{std.mem.trimEnd(u8, values.url, "/")});
+        },
+        .disable => {
+            try sync_config.remove(allocator, codex_home);
+            try out.writeAll("Credential server disabled\n");
+        },
+    }
+    try out.flush();
 }
 
 fn handleAutoCommand(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.types.AutoConfigOptions) !void {

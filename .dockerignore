@@ -1,0 +1,5 @@
+.git
+.zig-cache
+zig-cache
+zig-out
+node_modules

@@ -61,7 +61,10 @@ pub fn writeHelp(
     try writeCommandDetail(out, use_color, "config live --interval <seconds>");
     try writeCommandDetail(out, use_color, "config auto enable [--5h <percent>] [--weekly <percent>] [--interval <seconds>]");
     try writeCommandDetail(out, use_color, "config auto disable");
+    try writeCommandDetail(out, use_color, "config server set --url <url> --api-token <token>");
+    try writeCommandDetail(out, use_color, "config server disable");
     try writeCommandSummary(out, use_color, "daemon --watch|--once", "Run the background auto-switch worker");
+    try writeCommandSummary(out, use_color, "server [--port <port>]", "Run the credential storage server");
     try writeCommandSummary(out, use_color, "app", "Launch Codex App with CLI overrides");
 
     try out.writeAll("\n");
@@ -138,6 +141,7 @@ fn commandNameForTopic(topic: HelpTopic) []const u8 {
         .clean => "clean",
         .config => "config",
         .daemon => "daemon",
+        .server => "server",
         .app => "app",
     };
 }
@@ -155,20 +159,21 @@ fn commandDescriptionForTopic(topic: HelpTopic) []const u8 {
         .clean => "Delete backup and stale files under accounts/.",
         .config => "Manage live refresh and background auto-switch configuration.",
         .daemon => "Run one auto-switch cycle or the persistent background watcher.",
+        .server => "Run the authenticated credential storage HTTP server.",
         .app => "Launch Codex App with CLI overrides.",
     };
 }
 
 fn commandHelpHasExamples(topic: HelpTopic) bool {
     return switch (topic) {
-        .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .daemon, .app => true,
+        .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .daemon, .server, .app => true,
         else => false,
     };
 }
 
 fn commandHelpHasOptions(topic: HelpTopic) bool {
     return switch (topic) {
-        .list, .login, .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .daemon, .app => true,
+        .list, .login, .import_auth, .export_auth, .switch_account, .remove_account, .alias, .config, .daemon, .server, .app => true,
         else => false,
     };
 }
@@ -234,11 +239,14 @@ fn writeUsageLines(out: *std.Io.Writer, topic: HelpTopic) !void {
             try out.writeAll("  codex-auth config live --interval <seconds>\n");
             try out.writeAll("  codex-auth config auto enable [--5h <percent>] [--weekly <percent>] [--interval <seconds>]\n");
             try out.writeAll("  codex-auth config auto disable\n");
+            try out.writeAll("  codex-auth config server set --url <url> --api-token <token>\n");
+            try out.writeAll("  codex-auth config server disable\n");
         },
         .daemon => {
             try out.writeAll("  codex-auth daemon --watch [--5h <percent>] [--weekly <percent>] [--interval <seconds>]\n");
             try out.writeAll("  codex-auth daemon --once [--5h <percent>] [--weekly <percent>]\n");
         },
+        .server => try out.writeAll("  codex-auth server [--port <port>]\n"),
         .app => {
             try out.writeAll("  codex-auth app [--id <id>] [--codex-cli-path <path>] [--codex-home <path>] [--platform win|wsl|mac]\n");
         },
@@ -258,6 +266,7 @@ pub fn helpCommandForTopic(topic: HelpTopic) []const u8 {
         .clean => "codex-auth clean --help",
         .config => "codex-auth config --help",
         .daemon => "codex-auth daemon --help",
+        .server => "codex-auth server --help",
         .app => "codex-auth app --help",
     };
 }
@@ -318,6 +327,8 @@ fn writeOptionLines(out: *std.Io.Writer, topic: HelpTopic) !void {
             try out.writeAll("  auto disable      Stop and remove the background watcher.\n");
             try out.writeAll("  --5h, --weekly    Remaining-percent thresholds; both default to 2.\n");
             try out.writeAll("  --interval        Watch interval in seconds; defaults to 60.\n");
+            try out.writeAll("  server set        Configure credential synchronization.\n");
+            try out.writeAll("  server disable    Disable credential synchronization.\n");
         },
         .daemon => {
             try out.writeAll("  --watch            Run continuously.\n");
@@ -326,6 +337,7 @@ fn writeOptionLines(out: *std.Io.Writer, topic: HelpTopic) !void {
             try out.writeAll("  --weekly <percent> Switch at or below this weekly remainder (default 2).\n");
             try out.writeAll("  --interval <secs>  Watch interval from 5 to 3600 seconds (default 60).\n");
         },
+        .server => try out.writeAll("  --port <port>  Listen port; defaults to PORT or 8080.\n"),
         .app => {
             try out.writeAll("  --id <id>          Windows package/AUMID or macOS bundle identifier.\n");
             try out.writeAll("  --codex-cli-path <path>\n");
@@ -410,11 +422,13 @@ fn writeExampleLines(out: *std.Io.Writer, topic: HelpTopic) !void {
             try out.writeAll("  codex-auth config auto enable\n");
             try out.writeAll("  codex-auth config auto enable --5h 2 --weekly 2\n");
             try out.writeAll("  codex-auth config auto disable\n");
+            try out.writeAll("  codex-auth config server set --url https://codex-auth.example.com --api-token secret\n");
         },
         .daemon => {
             try out.writeAll("  codex-auth daemon --once\n");
             try out.writeAll("  codex-auth daemon --watch --5h 2 --weekly 2\n");
         },
+        .server => try out.writeAll("  API_TOKEN=shared-secret codex-auth server --port 8080\n"),
         .app => {
             try out.writeAll("  codex-auth app\n");
             try out.writeAll("  codex-auth app --platform win\n");

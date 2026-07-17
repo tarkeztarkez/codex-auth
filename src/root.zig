@@ -12,6 +12,8 @@ pub const auth = struct {
 pub const cli = @import("cli/root.zig");
 pub const workflows = @import("workflows/root.zig");
 pub const auto = @import("auto/root.zig");
+pub const sync = @import("sync/root.zig");
+pub const server = @import("server.zig");
 pub const app_workflow = @import("workflows/app.zig");
 
 pub const core = struct {

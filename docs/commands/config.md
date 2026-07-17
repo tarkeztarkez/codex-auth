@@ -5,6 +5,8 @@
 ```shell
 codex-auth config auto enable [--5h <percent>] [--weekly <percent>] [--interval <seconds>]
 codex-auth config auto disable
+codex-auth config server set --url <url> --api-token <token>
+codex-auth config server disable
 codex-auth config live --interval <seconds>
 ```
 

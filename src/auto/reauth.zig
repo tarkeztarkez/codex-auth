@@ -5,6 +5,7 @@ const usage_api = @import("../api/usage.zig");
 const auth = @import("../auth/auth.zig");
 const registry = @import("../registry/root.zig");
 const usage_refresh = @import("../workflows/usage.zig");
+const sync_client = @import("../sync/client.zig");
 
 const reauth_timeout_ms: u64 = 60_000;
 
@@ -89,4 +90,6 @@ fn repairAccount(
             try registry.replaceActiveAuthWithAccountByKey(allocator, codex_home, reg, account_key);
         }
     }
+    _ = sync_client.pushAccount(allocator, codex_home, account_key) catch |err|
+        std.log.warn("refreshed credential upload failed: {s}", .{@errorName(err)});
 }

@@ -19,12 +19,10 @@ RUN case "${TARGETARCH}" in amd64) ZIG_ARCH=x86_64 ;; arm64) ZIG_ARCH=aarch64 ;;
     && zig build -Doptimize=ReleaseSafe -Dtarget=${ZIG_ARCH}-linux-musl
 
 FROM alpine:3.23
-RUN apk add --no-cache curl && addgroup -S codex-auth && adduser -S -G codex-auth codex-auth \
-    && mkdir -p /data && chown codex-auth:codex-auth /data
+RUN apk add --no-cache curl postgresql-client && addgroup -S codex-auth && adduser -S -G codex-auth codex-auth
 COPY --from=build /src/zig-out/bin/codex-auth /usr/local/bin/codex-auth
 USER codex-auth
-ENV PORT=8080 DATA_DIR=/data
-VOLUME ["/data"]
+ENV PORT=8080
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl --fail --silent http://127.0.0.1:8080/health || exit 1
 ENTRYPOINT ["codex-auth", "server"]

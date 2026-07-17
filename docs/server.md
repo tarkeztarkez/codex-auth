@@ -8,11 +8,11 @@ The server stores Codex authentication documents so multiple codex-auth clients 
 docker build -t codex-auth-server .
 docker run --rm -p 8080:8080 \
   -e API_TOKEN='replace-with-a-long-random-secret' \
-  -v codex-auth-data:/data \
+  -e DATABASE_URL='postgresql://user:password@host:5432/codex_auth' \
   codex-auth-server
 ```
 
-`API_TOKEN` is required and must contain at least 16 characters. `PORT` defaults to `8080`, and `DATA_DIR` defaults to `/data`. TLS should be terminated by the deployment platform or a reverse proxy.
+`API_TOKEN` is required and must contain at least 16 characters. `DATABASE_URL` must point to a PostgreSQL database; the server creates its `credentials` table at startup. `PORT` defaults to `8080`. TLS should be terminated by the deployment platform or a reverse proxy.
 
 The authenticated API is:
 

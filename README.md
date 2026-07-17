@@ -113,11 +113,12 @@ switches away from the active account when either its 5-hour or weekly
 remaining allowance reaches 2% by default. Configure thresholds with
 `codex-auth config auto enable --5h <percent> --weekly <percent>`.
 
-When a stored account returns `401 token_expired`, the watcher runs
-`codex doctor --json` against that account in an isolated temporary
-`CODEX_HOME`. It waits for Codex to exit, validates the refreshed token against
-the usage API and verifies account identity before replacing the stored auth.
-Failed reauthentication attempts are rate-limited to once every 15 minutes.
+When a credential server is configured, clients read usage from the server cache instead of calling OpenAI's usage endpoint. The server refreshes that cache every three minutes and repairs `401 token_expired` credentials with the stored OAuth refresh token.
+
+Without a configured server, the watcher repairs `401 token_expired` accounts
+with the stored OAuth refresh token, validates the new token against the usage
+API, and verifies account identity before replacing the stored auth. Failed
+reauthentication attempts are rate-limited to once every 15 minutes.
 
 ## Codex App
 
@@ -179,12 +180,14 @@ This project is provided as-is and use is at your own risk.
 **Usage Data Refresh Source:**
 `codex-auth` supports two sources for refreshing account usage/usage limit information:
 
-1. **API (default):** The tool makes direct HTTPS requests to OpenAI's endpoints using your account's access token. This enables both usage refresh and team name refresh. `curl` must be available at runtime.
+1. **API (default):** Without a configured shared server, the client makes direct HTTPS requests to OpenAI's endpoints using your account's access token. With a configured server, usage comes from the server cache; the client can still request team names directly. `curl` must be available at runtime.
 2. **Local-only:** With per-command `--skip-api`, the tool scans local `~/.codex/sessions/*/rollout-*.jsonl` files for usage data and skips team name refresh API calls. This mode is safer, but it can be less accurate because recent Codex rollout files often contain `rate_limits: null`, so the latest local usage limit data may lag by several hours.
 
 **API Call Declaration:**
 By using the default API-backed refresh, this tool will send your ChatGPT access token to OpenAI's servers for usage limit and team name refresh. The exact endpoints are:
 - `GET https://chatgpt.com/backend-api/wham/usage`
 - `GET https://chatgpt.com/backend-api/accounts`
+
+When a shared server is configured, the server—not each client—calls the usage endpoint. Token repair also sends the stored refresh token to `POST https://auth.openai.com/oauth/token`, matching Codex CLI's OAuth refresh flow.
 
 This behavior may be detected by OpenAI and could violate their terms of service, potentially leading to account suspension or other risks. The decision to use this feature and any resulting consequences are entirely yours.

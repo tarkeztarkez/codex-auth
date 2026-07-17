@@ -1,6 +1,7 @@
 const std = @import("std");
 const app_runtime = @import("core/runtime.zig");
 const http_child = @import("api/http_child.zig");
+const server_usage = @import("server_usage.zig");
 
 const json_header = std.http.Header{ .name = "content-type", .value = "application/json" };
 
@@ -158,6 +159,11 @@ fn handleGet(allocator: std.mem.Allocator, request: *std.http.Server.Request, da
 fn serveRequest(allocator: std.mem.Allocator, request: *std.http.Server.Request, api_token: []const u8, database_url: []const u8) !void {
     if (request.head.method == .GET and std.mem.eql(u8, request.head.target, "/health")) return respondJson(request, .ok, "{\"ok\":true}");
     if (!authorized(request, api_token)) return respondJson(request, .unauthorized, "{\"error\":\"unauthorized\"}");
+    if (request.head.method == .GET and std.mem.eql(u8, request.head.target, "/v1/usage")) {
+        const body = try server_usage.getUsageJson(allocator, database_url);
+        defer allocator.free(body);
+        return respondJson(request, .ok, body);
+    }
     if (!std.mem.eql(u8, request.head.target, "/v1/credentials")) return respondJson(request, .not_found, "{\"error\":\"not_found\"}");
     switch (request.head.method) {
         .GET => try handleGet(allocator, request, database_url),
@@ -194,6 +200,8 @@ pub fn run(allocator: std.mem.Allocator, port_override: ?u16) !void {
     const database_url = try databaseUrlAlloc(allocator, admin_database_url, database_name);
     defer allocator.free(database_url);
     try ensureSchema(allocator, database_url);
+    try server_usage.ensureSchema(allocator, database_url);
+    try server_usage.start(database_url);
     const port = port_override orelse blk: {
         const raw = (try envOwned(allocator, "PORT")) orelse break :blk @as(u16, 8080);
         defer allocator.free(raw);

@@ -5,6 +5,7 @@ const usage_refresh = @import("../workflows/usage.zig");
 const types = @import("../cli/types.zig");
 const reauth = @import("reauth.zig");
 const sync_client = @import("../sync/client.zig");
+const sync_config = @import("../sync/config.zig");
 
 pub const isTokenExpired = reauth.isTokenExpired;
 const reauth_retry_cooldown_seconds: i64 = 15 * 60;
@@ -106,8 +107,6 @@ fn runCycleWithReauth(
 
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
-        _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
-            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
     }
     const active_key = reg.active_account_key orelse return .{ .result = .no_active_account };
     const active_idx = registry.findAccountIndexByAccountKey(&reg, active_key) orelse return .{ .result = .no_active_account };
@@ -115,7 +114,13 @@ fn runCycleWithReauth(
     var refresh = try usage_refresh.refreshForegroundUsageForDisplay(allocator, codex_home, &reg);
     defer refresh.deinit(allocator);
     var reauth_attempted = false;
-    if (allow_reauth) {
+    var server_configured = false;
+    if ((try sync_config.load(allocator, codex_home))) |loaded| {
+        var config = loaded;
+        config.deinit(allocator);
+        server_configured = true;
+    }
+    if (allow_reauth and !server_configured) {
         for (refresh.outcomes) |outcome| {
             if (reauth.isTokenExpired(outcome)) {
                 reauth_attempted = true;

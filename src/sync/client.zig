@@ -1,6 +1,7 @@
 const std = @import("std");
 const app_runtime = @import("../core/runtime.zig");
 const auth = @import("../auth/auth.zig");
+const usage_api = @import("../api/usage.zig");
 const http_child = @import("../api/http_child.zig");
 const http_executable = @import("../api/http_executable.zig");
 const registry = @import("../registry/root.zig");
@@ -17,6 +18,10 @@ fn successful(term: std.process.Child.Term) bool {
 
 fn endpointAlloc(allocator: std.mem.Allocator, config: *const config_mod.Config) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/v1/credentials", .{config.url});
+}
+
+fn usageEndpointAlloc(allocator: std.mem.Allocator, config: *const config_mod.Config) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/v1/usage", .{config.url});
 }
 
 fn runCurl(allocator: std.mem.Allocator, argv: []const []const u8, input: ?[]const u8) ![]u8 {
@@ -118,6 +123,11 @@ pub fn pull(allocator: std.mem.Allocator, codex_home: []const u8, reg: *registry
         const alias = if (registry.findAccountIndexByAccountKey(reg, key)) |idx| reg.accounts.items[idx].alias else "";
         const record = try registry.accountFromAuth(allocator, alias, &info);
         try registry.upsertAccount(allocator, reg, record);
+        if (reg.active_account_key) |active_key| {
+            if (std.mem.eql(u8, active_key, key)) {
+                try registry.replaceActiveAuthWithAccountByKey(allocator, codex_home, reg, key);
+            }
+        }
         count += 1;
     }
     if (count > 0) try registry.saveRegistry(allocator, codex_home, reg);
@@ -125,7 +135,99 @@ pub fn pull(allocator: std.mem.Allocator, codex_home: []const u8, reg: *registry
 }
 
 pub fn syncAll(allocator: std.mem.Allocator, codex_home: []const u8, reg: *registry.Registry) !usize {
-    const pulled = try pull(allocator, codex_home, reg);
-    _ = try pushAll(allocator, codex_home, reg);
-    return pulled;
+    return pull(allocator, codex_home, reg);
+}
+
+fn codexHomeFromAuthPath(auth_path: []const u8) ?[]const u8 {
+    const accounts_dir = std.fs.path.dirname(auth_path) orelse return null;
+    return std.fs.path.dirname(accounts_dir);
+}
+
+pub fn fetchUsageForAuthPathsDetailedBatch(
+    allocator: std.mem.Allocator,
+    auth_paths: []const []const u8,
+    max_concurrency: usize,
+) ![]usage_api.BatchUsageFetchResult {
+    _ = max_concurrency;
+    const results = try allocator.alloc(usage_api.BatchUsageFetchResult, auth_paths.len);
+    errdefer {
+        for (results) |*result| result.deinit(allocator);
+        allocator.free(results);
+    }
+    for (results) |*result| result.* = .{};
+    if (auth_paths.len == 0) return results;
+
+    const codex_home = codexHomeFromAuthPath(auth_paths[0]) orelse return error.InvalidAccountAuthPath;
+    var config = (try config_mod.load(allocator, codex_home)) orelse return error.ServerNotConfigured;
+    defer config.deinit(allocator);
+    const curl = try http_executable.resolveCurlExecutableForLaunchAlloc(allocator);
+    defer allocator.free(curl);
+    const endpoint = try usageEndpointAlloc(allocator, &config);
+    defer allocator.free(endpoint);
+    const auth_header = try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}", .{config.api_token});
+    defer allocator.free(auth_header);
+    const response = try runCurl(allocator, &.{ curl, "--fail-with-body", "--silent", "--show-error", "--header", auth_header, endpoint }, null);
+    defer allocator.free(response);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, response, .{});
+    defer parsed.deinit();
+    const items = switch (parsed.value) {
+        .array => |array| array,
+        else => return error.InvalidServerResponse,
+    };
+
+    for (auth_paths, 0..) |auth_path, result_idx| {
+        var info = auth.parseAuthInfo(allocator, auth_path) catch |err| {
+            results[result_idx].error_name = @errorName(err);
+            continue;
+        };
+        defer info.deinit(allocator);
+        const account_key = info.record_key orelse {
+            results[result_idx].missing_auth = true;
+            continue;
+        };
+        var matched: ?std.json.ObjectMap = null;
+        for (items.items) |item| {
+            const obj = switch (item) {
+                .object => |value| value,
+                else => continue,
+            };
+            const key = switch (obj.get("account_key") orelse continue) {
+                .string => |value| value,
+                else => continue,
+            };
+            if (std.mem.eql(u8, key, account_key)) {
+                matched = obj;
+                break;
+            }
+        }
+        const obj = matched orelse {
+            results[result_idx].error_name = "ServerUsageUnavailable";
+            continue;
+        };
+        if (obj.get("status_code")) |value| switch (value) {
+            .integer => |status| if (status >= 0 and status <= std.math.maxInt(u16)) {
+                results[result_idx].status_code = @intCast(status);
+            },
+            else => {},
+        };
+        const body = switch (obj.get("body") orelse {
+            results[result_idx].error_name = "ServerUsageUnavailable";
+            continue;
+        }) {
+            .string => |value| value,
+            else => {
+                results[result_idx].error_name = "ServerUsageUnavailable";
+                continue;
+            },
+        };
+        results[result_idx].error_code = usage_api.parseNonSuccessErrorCode(allocator, results[result_idx].status_code, body);
+        if (results[result_idx].status_code) |status| {
+            if (status < 200 or status > 299) continue;
+        }
+        results[result_idx].snapshot = usage_api.parseUsageResponse(allocator, body) catch |err| {
+            results[result_idx].error_name = @errorName(err);
+            continue;
+        };
+    }
+    return results;
 }

@@ -1,5 +1,4 @@
 const std = @import("std");
-const sync_client = @import("../sync/client.zig");
 const cli = @import("../cli/root.zig");
 const registry = @import("../registry/root.zig");
 const live_flow = @import("live.zig");
@@ -118,8 +117,6 @@ fn handleSwitchQuery(
     defer reg.deinit(allocator);
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
-        _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
-            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
     }
     std.debug.assert(opts.api_mode == .default);
     std.debug.assert(!opts.live);
@@ -165,8 +162,6 @@ fn handleSwitchPrevious(
     defer reg.deinit(allocator);
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
-        _ = sync_client.pushAll(allocator, codex_home, &reg) catch |err|
-            std.log.warn("credential upload failed: {s}", .{@errorName(err)});
     }
 
     const previous_account_key_value = reg.previous_active_account_key orelse {

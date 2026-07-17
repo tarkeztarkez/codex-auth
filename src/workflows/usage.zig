@@ -2,6 +2,8 @@ const std = @import("std");
 const registry = @import("../registry/root.zig");
 const sessions = @import("../session.zig");
 const usage_api = @import("../api/usage.zig");
+const sync_client = @import("../sync/client.zig");
+const sync_config = @import("../sync/config.zig");
 
 const foreground_usage_refresh_concurrency: usize = 5;
 pub const max_usage_override_display_width: usize = 25;
@@ -294,6 +296,17 @@ pub fn refreshForegroundUsageForDisplayWithApiFetchersWithPoolInitUsingApiEnable
     persist_registry: bool,
     active_only: bool,
 ) !ForegroundUsageRefreshState {
+    var effective_usage_fetcher = usage_fetcher;
+    var effective_batch_fetcher = batch_fetcher;
+    if (usage_api_enabled) {
+        if ((try sync_config.load(allocator, codex_home))) |loaded| {
+            var config = loaded;
+            config.deinit(allocator);
+            _ = try sync_client.pull(allocator, codex_home, reg);
+            effective_usage_fetcher = usage_api.fetchUsageForAuthPathDetailed;
+            effective_batch_fetcher = sync_client.fetchUsageForAuthPathsDetailedBatch;
+        }
+    }
     var state = try initForegroundUsageRefreshState(allocator, reg.accounts.items.len);
     errdefer state.deinit(allocator);
 
@@ -316,7 +329,7 @@ pub fn refreshForegroundUsageForDisplayWithApiFetchersWithPoolInitUsingApiEnable
     }
     for (worker_results) |*worker_result| worker_result.* = .{};
 
-    if (batch_fetcher) |fetch_batch| batch_fetch: {
+    if (effective_batch_fetcher) |fetch_batch| batch_fetch: {
         var auth_path_arena_state = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
         defer auth_path_arena_state.deinit();
         const auth_path_arena = auth_path_arena_state.allocator();
@@ -390,13 +403,13 @@ pub fn refreshForegroundUsageForDisplayWithApiFetchersWithPoolInitUsingApiEnable
                 allocator,
                 codex_home,
                 reg,
-                usage_fetcher,
+                effective_usage_fetcher,
                 worker_results,
                 active_account_key,
                 active_only,
             );
         } else {
-            runForegroundUsageRefreshWorkersSerially(allocator, codex_home, reg, usage_fetcher, worker_results, active_account_key, active_only);
+            runForegroundUsageRefreshWorkersSerially(allocator, codex_home, reg, effective_usage_fetcher, worker_results, active_account_key, active_only);
         }
     }
 

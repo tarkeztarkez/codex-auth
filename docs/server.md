@@ -1,6 +1,8 @@
-# Credential server
+# Shared account server
 
-The server stores Codex authentication documents so multiple codex-auth clients can share accounts. It does not call OpenAI APIs and does not manage usage limits.
+The server stores Codex authentication documents so multiple codex-auth clients can share accounts. It is also the usage authority for configured clients: it refreshes usage from OpenAI every three minutes and caches the response. Configured clients read that cache instead of sending usage requests to OpenAI themselves.
+
+When OpenAI returns `401 token_expired`, the server exchanges the stored refresh token at the same OAuth endpoint and with the same public client ID used by Codex CLI. It saves the rotated access, ID, and refresh tokens, validates them with a new usage request, and distributes the refreshed authentication document to clients on their next pull. If a refresh token has expired, been reused, or been revoked, interactive login is still required.
 
 ## Run with Docker
 
@@ -18,6 +20,7 @@ The authenticated API is:
 
 - `GET /v1/credentials` — return all stored credential envelopes.
 - `PUT /v1/credentials` — create or replace one credential envelope.
+- `GET /v1/usage` — return the latest cached usage response for every account.
 - `GET /health` — unauthenticated health check.
 
 Clients authenticate with `Authorization: Bearer <API_TOKEN>`.
@@ -37,4 +40,4 @@ The token is stored in `~/.codex/accounts/server.json` with private file permiss
 codex-auth config server disable
 ```
 
-Successful login and import operations upload credentials. Successful expired-token repair uploads the refreshed credential. Every daemon cycle first downloads server credentials and then uploads the merged local set. Network failures are logged and do not prevent local account management or usage refresh.
+Successful login and import operations upload credentials. The server is authoritative after upload; clients pull credentials rather than periodically pushing their local copies back. Network failures are logged and do not prevent local account management. API-backed usage display requires the configured server to be reachable; `--skip-api` continues to use local rollout data.
